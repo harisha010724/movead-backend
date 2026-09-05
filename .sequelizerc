@@ -1,0 +1,11 @@
+const path = require('node:path');
+
+// sequelize-cli reads plain CommonJS, so migrations stay .js and are run
+// directly by the CLI rather than compiled. That keeps `db:migrate` identical
+// in development, in CI and in the pre-deploy ECS task.
+module.exports = {
+  config: path.resolve('src', 'db', 'config.js'),
+  'models-path': path.resolve('src', 'db', 'models'),
+  'seeders-path': path.resolve('src', 'db', 'seeders'),
+  'migrations-path': path.resolve('src', 'db', 'migrations'),
+};

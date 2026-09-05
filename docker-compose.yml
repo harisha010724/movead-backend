@@ -1,0 +1,51 @@
+name: movead
+
+# Local dependencies only. The three Node processes run on the host via
+# `npm run dev:api` and friends, so a restart is instant and a debugger
+# attaches without extra plumbing.
+
+services:
+  postgres:
+    # PostGIS is not optional: zone classification and distance are SQL.
+    image: postgis/postgis:16-3.4
+    container_name: movead-postgres
+    environment:
+      POSTGRES_USER: movead
+      POSTGRES_PASSWORD: movead
+      POSTGRES_DB: movead
+      # Deterministic sorting regardless of the host's locale.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U movead -d movead']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command:
+      - postgres
+      # Timings in the log for anything slower than a fifth of a second, which
+      # is where a missing spatial index announces itself.
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+
+  redis:
+    image: redis:7-alpine
+    container_name: movead-redis
+    ports:
+      - '6379:6379'
+    # No persistence: everything here is a cache, a counter or a queue that
+    # can be rebuilt. Losing it locally should be a non-event.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

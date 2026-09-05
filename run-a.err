@@ -1,0 +1,94 @@
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/onboarding.test.ts > the document checklist > lists what is required and what is missing
+Error: expected 201 "Created", got 401 "Unauthorized"
+ ❯ createDriver test/onboarding.test.ts:309:71
+    307|
+    308| async function createDriver(driver = DRIVER): Promise<string> {
+    309|   const response = await admin.post('/v1/admin/drivers').send(driver).…
+       |                                                                       ^
+    310|   return String(response.body.id);
+    311| }
+ ❯ test/onboarding.test.ts:96:28
+ ❯ Test._assertStatus node_modules/supertest/lib/test.js:309:14
+ ❯ node_modules/supertest/lib/test.js:365:13
+ ❯ Test._assertFunction node_modules/supertest/lib/test.js:342:13
+ ❯ Test.assert node_modules/supertest/lib/test.js:195:23
+ ❯ localAssert node_modules/supertest/lib/test.js:138:14
+ ❯ Server.<anonymous> node_modules/supertest/lib/test.js:152:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯
+
+ FAIL  test/onboarding.test.ts > the document checklist > moves the driver to DOCUMENTS_SUBMITTED on the first upload
+ FAIL  test/onboarding.test.ts > the document checklist > will not verify a document that has already expired
+ FAIL  test/onboarding.test.ts > approving a driver > is refused while a mandatory document is unverified
+ FAIL  test/onboarding.test.ts > approving a driver > returns a rejected driver to PENDING with the reason recorded
+ FAIL  test/onboarding.test.ts > the vehicle state machine > normalises the registration and refuses a duplicate plate platform-wide
+ FAIL  test/onboarding.test.ts > the vehicle state machine > will not mark documents verified while any is outstanding
+ FAIL  test/onboarding.test.ts > the vehicle state machine > demands a reason to reject, and keeps it on the record
+ FAIL  test/onboarding.test.ts > the review queue > filters by status and searches by name or mobile
+Error: expected 201 "Created", got 409 "Conflict"
+ ❯ bootstrap test/helpers/admin.ts:41:6
+     39|     .post('/v1/admin/bootstrap')
+     40|     .send({ ...ADMIN, token: BOOTSTRAP_TOKEN })
+     41|     .expect(201);
+       |      ^
+     42| }
+     43|
+ ❯ signIn test/helpers/admin.ts:47:9
+ ❯ test/onboarding.test.ts:58:17
+ ❯ Test._assertStatus node_modules/supertest/lib/test.js:309:14
+ ❯ node_modules/supertest/lib/test.js:365:13
+ ❯ Test._assertFunction node_modules/supertest/lib/test.js:342:13
+ ❯ Test.assert node_modules/supertest/lib/test.js:195:23
+ ❯ localAssert node_modules/supertest/lib/test.js:138:14
+ ❯ Server.<anonymous> node_modules/supertest/lib/test.js:152:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯
+
+ FAIL  test/onboarding.test.ts > the document checklist > supersedes rather than overwrites a resubmission, keeping the rejected copy
+ FAIL  test/onboarding.test.ts > the document checklist > demands a reason for a rejection
+Error: expected 200 "OK", got 401 "Unauthorized"
+ ❯ enrolAndVerify test/helpers/admin.ts:61:78
+     59|   password: string,
+     60| ): Promise<void> {
+     61|   const login = await agent.post('/v1/auth/login').send({ email, passw…
+       |                                                                              ^
+     62|   const enrol = await agent
+     63|     .post('/v1/auth/mfa/enrol')
+ ❯ signIn test/helpers/admin.ts:48:9
+ ❯ test/onboarding.test.ts:58:11
+ ❯ Test._assertStatus node_modules/supertest/lib/test.js:309:14
+ ❯ node_modules/supertest/lib/test.js:365:13
+ ❯ Test._assertFunction node_modules/supertest/lib/test.js:342:13
+ ❯ Test.assert node_modules/supertest/lib/test.js:195:23
+ ❯ localAssert node_modules/supertest/lib/test.js:138:14
+ ❯ Server.<anonymous> node_modules/supertest/lib/test.js:152:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/16]⎯
+
+ FAIL  test/onboarding.test.ts > approving a driver > succeeds once the licence is verified
+ FAIL  test/onboarding.test.ts > approving a driver > records a suspension reason, and clears it on reinstatement
+ FAIL  test/onboarding.test.ts > the vehicle state machine > will not approve a vehicle straight from PENDING
+ FAIL  test/onboarding.test.ts > the vehicle state machine > walks PENDING to DOCUMENTS_VERIFIED to APPROVED, recording every step
+ FAIL  test/onboarding.test.ts > the audit trail > attributes every decision to the admin who made it
+Error: expected 200 "OK", got 401 "Unauthorized"
+ ❯ enrolAndVerify test/helpers/admin.ts:65:6
+     63|     .post('/v1/auth/mfa/enrol')
+     64|     .send({ challengeToken: login.body.challengeToken })
+     65|     .expect(200);
+       |      ^
+     66|
+     67|   await agent
+ ❯ signIn test/helpers/admin.ts:48:3
+ ❯ test/onboarding.test.ts:58:11
+ ❯ Test._assertStatus node_modules/supertest/lib/test.js:309:14
+ ❯ node_modules/supertest/lib/test.js:365:13
+ ❯ Test._assertFunction node_modules/supertest/lib/test.js:342:13
+ ❯ Test.assert node_modules/supertest/lib/test.js:195:23
+ ❯ localAssert node_modules/supertest/lib/test.js:138:14
+ ❯ Server.<anonymous> node_modules/supertest/lib/test.js:152:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/16]⎯
+

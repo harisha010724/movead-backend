@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+
+# Rendered emails from MAIL_TRANSPORT=file and `npm run mail:preview`. Real
+# invitation links land here in development, so they are never committed.
+tmp/
+campaign-images/
+
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+
+.idea/
+.vscode/*
+!.vscode/extensions.json
