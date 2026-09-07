@@ -50,9 +50,20 @@ export function buildOpenApiDocument() {
         'Errors share one flat envelope: a stable `code` and a human `message`.',
       ].join('\n'),
     },
+    /*
+     * Relative first, so it resolves to whichever host served the document —
+     * localhost today, the Azure default domain now, the custom domain later,
+     * with nothing to edit in between.
+     *
+     * It also has to be first for "Try it out" to work at all. The session is a
+     * SameSite=Strict cookie, so a request aimed at any origin other than the
+     * one holding it arrives unauthenticated and every guarded endpoint answers
+     * 401 — which reads as a broken API rather than the wrong server selected.
+     */
     servers: [
+      { url: '/', description: 'This server' },
       { url: `http://localhost:${String(config.http.apiPort)}`, description: 'Local' },
-      { url: 'https://api.movead.in', description: 'Production' },
+      { url: 'https://api.movead.in', description: 'Production (custom domain)' },
     ],
     tags: [
       { name: 'health', description: 'Liveness and readiness probes' },

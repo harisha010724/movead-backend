@@ -7,12 +7,16 @@
   },
   "servers": [
     {
+      "url": "/",
+      "description": "This server"
+    },
+    {
       "url": "http://localhost:8080",
       "description": "Local"
     },
     {
       "url": "https://api.movead.in",
-      "description": "Production"
+      "description": "Production (custom domain)"
     }
   ],
   "tags": [
