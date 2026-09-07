@@ -13,6 +13,7 @@
     "dev:ingestion": "tsx watch src/entrypoints/ingestion.ts",
     "dev:worker": "tsx watch src/entrypoints/worker.ts",
     "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/entrypoints/api.js",
     "start:api": "node dist/entrypoints/api.js",
     "start:ingestion": "node dist/entrypoints/ingestion.js",
     "start:worker": "node dist/entrypoints/worker.js",
