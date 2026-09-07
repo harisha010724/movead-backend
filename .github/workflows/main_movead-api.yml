@@ -19,21 +19,34 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node.js version
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22.x'
+          cache: npm
 
-      - name: npm install, build, and test
+      # No `npm run test` here on purpose. The suite takes a Postgres advisory
+      # lock and truncates tables between files, so it needs a live Postgres and
+      # Redis; on a bare runner it fails and the deploy job never runs.
+      - name: Install and build
         run: |
-          npm install
-          npm run build --if-present
-          npm run test --if-present
+          npm ci
+          npm run build
+
+      # One zip instead of ~40k individual file uploads.
+      #
+      # Deliberately more than `dist/`: `openapi/` is read from disk at runtime,
+      # and `.sequelizerc` points the migration CLI at `src/db/migrations` and
+      # `src/db/config.js`, which are plain CommonJS and never compiled into
+      # `dist/`. There is also no `npm prune --omit=dev`, because migrations run
+      # over SSH against this tree and `sequelize-cli` is a devDependency.
+      - name: Zip artifact for deployment
+        run: zip -qr release.zip . -x '.git/*' '.github/*'
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -47,7 +60,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-      
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -61,5 +74,4 @@ jobs:
         with:
           app-name: 'movead-api'
           slot-name: 'Production'
-          package: .
-          
+          package: release.zip

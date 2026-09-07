@@ -1,7 +1,26 @@
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 
-loadDotenv();
+/*
+ * Environment files, most specific first: `.env.production` when the process
+ * was launched with NODE_ENV=production, `.env.development` otherwise, with
+ * `.env` underneath either as the shared base.
+ *
+ * Order is precedence. dotenv keeps the first value it sees for a key and never
+ * overwrites one already on `process.env`, so a platform variable beats a file
+ * and `.env.production` beats `.env` — which is what lets the production file
+ * carry only the values that differ.
+ *
+ * The file is chosen by the NODE_ENV the process was LAUNCHED with, not by the
+ * NODE_ENV written inside it. There is no way around that: the file has to be
+ * picked before it can be read. `NODE_ENV=production node dist/entrypoints/api.js`
+ * reads the production file; a bare `node dist/entrypoints/api.js` does not.
+ *
+ * A missing file is not an error. The runtime image carries no env file at all,
+ * so in Azure both paths miss and the container's own variables are the only
+ * source — which is the intended arrangement, not a fallback.
+ */
+loadDotenv({ path: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'] });
 
 /**
  * Every environment variable the process reads, validated once at startup.
