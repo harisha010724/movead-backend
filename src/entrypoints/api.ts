@@ -7,6 +7,11 @@ import {
   advertiserNotificationRoutes,
 } from '../modules/notifications/notifications.routes';
 import { campaignRoutes } from '../modules/campaigns/campaigns.routes';
+import {
+  adminDashboardRoutes,
+  advertiserDashboardRoutes,
+  fleetRoutes,
+} from '../modules/dashboards/dashboards.routes';
 import { driverPortalRoutes } from '../modules/drivers/driver-portal.routes';
 import { adminDriverRoutes } from '../modules/drivers/drivers.routes';
 import { adminInstallationRoutes } from '../modules/installations/installations.routes';
@@ -51,7 +56,16 @@ v1.use('/auth', authRoutes());
 v1.use('/invitations', invitationRoutes());
 v1.use('/campaigns', campaignRoutes());
 v1.use('/notifications', advertiserNotificationRoutes());
+
+// Before the advertiser fleet router, which guards everything under
+// `/vehicles` as an advertiser. The live map is read by operations too, and a
+// router that has already refused the request cannot be reached past.
+v1.use('/vehicles', fleetRoutes());
 v1.use('/vehicles', advertiserVehicleRoutes());
+
+// Two routers on one prefix, for the same reason: the audience differs by path.
+v1.use('/dashboard', adminDashboardRoutes());
+v1.use('/dashboard', advertiserDashboardRoutes());
 
 // Before the portal router, which guards everything under `/driver`. Sign-in
 // is the one thing there that cannot already be signed in.
@@ -73,6 +87,20 @@ export const app = createApp({
     // `/openapi.json`, which the clients' `api:pull` fetches, and `/docs`.
     { path: '/', router: docsRoutes() },
     { path: '/v1', router: v1 },
+    /*
+     * The same router again, because a browser reaches this service by two
+     * different routes and only one of them can be same-origin.
+     *
+     * In development Vite proxies `/api` to keep the page and the API on one
+     * origin, so the session cookie behaves as it will in production. Static
+     * Web Apps does the same for a linked backend — and, per its docs,
+     * forwards the whole path including `/api` rather than stripping it. So
+     * the proxied address is `/api/v1/...` in both places.
+     *
+     * Aliased rather than moved: the driver app and every published link point
+     * at `/v1`, and a path that has shipped to a phone cannot be renamed.
+     */
+    { path: '/api/v1', router: v1 },
   ],
 });
 

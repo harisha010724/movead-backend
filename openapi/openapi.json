@@ -1294,6 +1294,567 @@
           "byteSize"
         ]
       },
+      "LiveVehicleState": {
+        "type": "string",
+        "enum": [
+          "RUNNING",
+          "IDLE",
+          "OFFLINE",
+          "GPS_PAUSED"
+        ],
+        "description": "Derived from the last GPS fix, not stored. A vehicle that stops reporting becomes OFFLINE without anything having to write to it."
+      },
+      "SeriesPoint": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ]
+      },
+      "KmSummary": {
+        "type": "object",
+        "properties": {
+          "prime": {
+            "type": "number"
+          },
+          "secondary": {
+            "type": "number"
+          },
+          "network": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number",
+            "description": "Every segment in the range, whatever its state."
+          },
+          "rejected": {
+            "type": "number"
+          },
+          "pending": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "prime",
+          "secondary",
+          "network",
+          "total",
+          "rejected",
+          "pending"
+        ],
+        "description": "Zone figures are billable distance only. A rejected kilometre happened in a zone but nobody is charged for it, so counting it as inventory would overstate what was bought."
+      },
+      "AdminDashboard": {
+        "type": "object",
+        "properties": {
+          "supply": {
+            "type": "object",
+            "properties": {
+              "registeredDrivers": {
+                "type": "integer"
+              },
+              "approvedDrivers": {
+                "type": "integer"
+              },
+              "activeCampaigns": {
+                "type": "integer"
+              },
+              "currentlyTracking": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "registeredDrivers",
+              "approvedDrivers",
+              "activeCampaigns",
+              "currentlyTracking"
+            ]
+          },
+          "inventoryToday": {
+            "$ref": "#/components/schemas/KmSummary"
+          },
+          "moneyToday": {
+            "type": "object",
+            "properties": {
+              "advertiserRevenue": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "driverLiability": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "grossSpread": {
+                "$ref": "#/components/schemas/Money"
+              }
+            },
+            "required": [
+              "advertiserRevenue",
+              "driverLiability",
+              "grossSpread"
+            ]
+          },
+          "queues": {
+            "type": "object",
+            "properties": {
+              "documentsPending": {
+                "type": "integer"
+              },
+              "installationsPending": {
+                "type": "integer"
+              },
+              "kmFlagged": {
+                "type": "integer"
+              },
+              "payoutsAwaitingRelease": {
+                "type": "integer",
+                "description": "Always 0 until payout runs exist."
+              }
+            },
+            "required": [
+              "documentsPending",
+              "installationsPending",
+              "kmFlagged",
+              "payoutsAwaitingRelease"
+            ]
+          },
+          "revenueDaily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            }
+          },
+          "vehicleStatus": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "$ref": "#/components/schemas/LiveVehicleState"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "state",
+                "count"
+              ]
+            }
+          }
+        },
+        "required": [
+          "supply",
+          "inventoryToday",
+          "moneyToday",
+          "queues",
+          "revenueDaily",
+          "vehicleStatus"
+        ]
+      },
+      "AdvertiserDashboard": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "km": {
+            "$ref": "#/components/schemas/KmSummary"
+          },
+          "spend": {
+            "type": "object",
+            "properties": {
+              "prime": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "secondary": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "network": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "total": {
+                "$ref": "#/components/schemas/Money"
+              }
+            },
+            "required": [
+              "prime",
+              "secondary",
+              "network",
+              "total"
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "remaining": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "activeVehicles": {
+            "type": "integer"
+          },
+          "costPerKm": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "impressions": {
+            "type": "number",
+            "description": "Always 0. No acceptance criterion defines how an impression is counted, and nothing in the pricing path may depend on this field until one does."
+          },
+          "costPerThousandImpressions": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "comparison": {
+            "type": "object",
+            "properties": {
+              "impressions": {
+                "type": "number"
+              },
+              "verifiedKm": {
+                "type": "number"
+              },
+              "spend": {
+                "type": "number"
+              },
+              "activeVehicles": {
+                "type": "number"
+              },
+              "costPerThousandImpressions": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "impressions",
+              "verifiedKm",
+              "spend",
+              "activeVehicles",
+              "costPerThousandImpressions"
+            ],
+            "description": "Change against the preceding range of equal length, as a ratio. Zero where the previous period had nothing to compare against."
+          },
+          "rates": {
+            "type": "object",
+            "properties": {
+              "advertiser": {
+                "type": "object",
+                "properties": {
+                  "PRIME": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "SECONDARY": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "NETWORK": {
+                    "$ref": "#/components/schemas/Money"
+                  }
+                }
+              },
+              "driver": {
+                "type": "object",
+                "properties": {
+                  "PRIME": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "SECONDARY": {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  "NETWORK": {
+                    "$ref": "#/components/schemas/Money"
+                  }
+                }
+              },
+              "effectiveFrom": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "advertiser",
+              "driver",
+              "effectiveFrom"
+            ]
+          },
+          "impressionsDaily": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            }
+          },
+          "impressionsHourly": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            }
+          },
+          "impressionsByArea": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            }
+          },
+          "impressionsByVehicleType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            }
+          },
+          "vehicleStatus": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "$ref": "#/components/schemas/LiveVehicleState"
+                },
+                "count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "state",
+                "count"
+              ]
+            }
+          },
+          "topVehicles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "vehicleNumber": {
+                  "type": "string"
+                },
+                "driverName": {
+                  "type": "string"
+                },
+                "area": {
+                  "type": "string"
+                },
+                "km": {
+                  "type": "number"
+                },
+                "zoneKm": {
+                  "type": "object",
+                  "properties": {
+                    "prime": {
+                      "type": "number"
+                    },
+                    "secondary": {
+                      "type": "number"
+                    },
+                    "network": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prime",
+                    "secondary",
+                    "network"
+                  ]
+                },
+                "impressions": {
+                  "type": "number"
+                },
+                "spend": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/LiveVehicleState"
+                }
+              },
+              "required": [
+                "vehicleNumber",
+                "driverName",
+                "area",
+                "km",
+                "zoneKm",
+                "impressions",
+                "spend",
+                "state"
+              ]
+            }
+          },
+          "alerts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning",
+                    "critical"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "occurredAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "severity",
+                "message",
+                "occurredAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "campaignId",
+          "km",
+          "spend",
+          "budget",
+          "remaining",
+          "activeVehicles",
+          "costPerKm",
+          "impressions",
+          "costPerThousandImpressions",
+          "comparison",
+          "rates",
+          "impressionsDaily",
+          "impressionsHourly",
+          "impressionsByArea",
+          "impressionsByVehicleType",
+          "vehicleStatus",
+          "topVehicles",
+          "alerts"
+        ]
+      },
+      "LivePositions": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "vehicleRef": {
+                  "type": "string"
+                },
+                "lat": {
+                  "type": "number"
+                },
+                "lon": {
+                  "type": "number"
+                },
+                "state": {
+                  "$ref": "#/components/schemas/LiveVehicleState"
+                },
+                "updatedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "vehicleRef",
+                "lat",
+                "lon",
+                "state",
+                "updatedAt"
+              ]
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When this answer was produced, not the age of the newest fix."
+          }
+        },
+        "required": [
+          "items",
+          "updatedAt"
+        ]
+      },
+      "VehicleListing": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "vehicleRef": {
+                  "type": "string"
+                },
+                "vehicleType": {
+                  "type": "string",
+                  "enum": [
+                    "AUTO",
+                    "CAB"
+                  ]
+                },
+                "primaryArea": {
+                  "type": "string"
+                },
+                "avgKmPerDay": {
+                  "type": "number"
+                },
+                "zoneMix": {
+                  "type": "object",
+                  "properties": {
+                    "prime": {
+                      "type": "number"
+                    },
+                    "secondary": {
+                      "type": "number"
+                    },
+                    "network": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prime",
+                    "secondary",
+                    "network"
+                  ],
+                  "description": "Proportions of billable distance over the last 30 days. Sums to 1, or to 0 for a vehicle that has not driven."
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "vehicleRef",
+                "vehicleType",
+                "primaryArea",
+                "avgKmPerDay",
+                "zoneMix",
+                "status"
+              ]
+            }
+          },
+          "page": {
+            "type": "integer"
+          },
+          "pageSize": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total"
+        ]
+      },
       "DriverLocation": {
         "type": "object",
         "properties": {
@@ -5911,6 +6472,269 @@
           },
           "409": {
             "description": "Not running or paused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dashboard/admin": {
+      "get": {
+        "tags": [
+          "dashboards"
+        ],
+        "summary": "Platform-wide operations dashboard",
+        "description": "Supply, inventory, money and queue depths over a date range. Requires `campaign.read`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "example": "2026-09-08"
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "example": "2026-09-08"
+            },
+            "required": true,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The dashboard.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dashboard/advertiser": {
+      "get": {
+        "tags": [
+          "dashboards"
+        ],
+        "summary": "One campaign’s performance",
+        "description": "Scoped to the signed-in advertiser. An id belonging to another advertiser is a 404, not a 403 — whether their campaigns exist is not ours to confirm. Requires `advertiser.report.read`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "example": "2026-09-08"
+            },
+            "required": true,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "example": "2026-09-08"
+            },
+            "required": true,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Defaults to the advertiser’s most recent campaign."
+            },
+            "required": false,
+            "description": "Defaults to the advertiser’s most recent campaign.",
+            "name": "campaignId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The dashboard.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvertiserDashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/vehicles/live-positions": {
+      "get": {
+        "tags": [
+          "dashboards"
+        ],
+        "summary": "Last known position of every working vehicle",
+        "description": "Either portal. Vehicles with no live assignment are excluded; ones that have stopped reporting keep their last fix, because where a vehicle went quiet is the first thing anyone asks.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Omit for the whole fleet."
+            },
+            "required": false,
+            "description": "Omit for the whole fleet.",
+            "name": "campaignId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Positions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivePositions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/vehicles": {
+      "get": {
+        "tags": [
+          "dashboards"
+        ],
+        "summary": "The fleet with how it performs",
+        "description": "Operations’ vehicle report, carrying the plate and the operating area. Distinct from `/v1/vehicles/available`, which is the advertiser’s booking view and withholds both. Requires `vehicle.read`.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "pageSize",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Vehicles.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleListing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
             "content": {
               "application/json": {
                 "schema": {

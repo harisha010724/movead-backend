@@ -10,6 +10,7 @@ import { registry } from './registry';
 import './advertisers';
 import './campaigns';
 import './common';
+import './dashboards';
 import './drivers';
 import './health';
 import './identity';
