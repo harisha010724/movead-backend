@@ -60,14 +60,26 @@ export function buildOpenApiDocument() {
      * Production sits first because Swagger UI selects the first entry, and the
      * session is a SameSite=Strict cookie — a request aimed at any origin other
      * than the one serving this page arrives without it, so every guarded
-     * endpoint would answer 401.
+     * endpoint would answer 401. That is also why the portal's dev server is
+     * listed ahead of the API's own port: both reach the same service, but only
+     * the proxied one carries the cookie, so the entry that works is the one
+     * offered first.
+     *
+     * Every base carries `/api`, which is where the paths below are reachable
+     * in a browser. They are also served without it, but the prefixed form is
+     * the one the portals use and the one a proxy in front of this service
+     * forwards, so it is what a reader should copy.
      */
     servers: [
       {
-        url: 'https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net',
+        url: 'https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net/api',
         description: 'Production',
       },
-      { url: `http://localhost:${String(config.http.apiPort)}`, description: 'Local' },
+      { url: 'http://localhost:5173/api', description: 'Local — through the portal dev server' },
+      {
+        url: `http://localhost:${String(config.http.apiPort)}/api`,
+        description: 'Local — straight to the API',
+      },
     ],
     tags: [
       { name: 'health', description: 'Liveness and readiness probes' },

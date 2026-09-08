@@ -7,12 +7,16 @@
   },
   "servers": [
     {
-      "url": "https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net",
+      "url": "https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net/api",
       "description": "Production"
     },
     {
-      "url": "http://localhost:8080",
-      "description": "Local"
+      "url": "http://localhost:5173/api",
+      "description": "Local — through the portal dev server"
+    },
+    {
+      "url": "http://localhost:8080/api",
+      "description": "Local — straight to the API"
     }
   ],
   "tags": [
