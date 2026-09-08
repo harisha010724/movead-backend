@@ -51,19 +51,22 @@ export function buildOpenApiDocument() {
       ].join('\n'),
     },
     /*
-     * Relative first, so it resolves to whichever host served the document —
-     * localhost today, the Azure default domain now, the custom domain later,
-     * with nothing to edit in between.
+     * Only hosts that actually answer. `api.movead.in` is the intended address
+     * but does not resolve yet, and an entry that cannot be reached is worse
+     * than a missing one: "Try it out" fails against it with a network error
+     * that reads as a broken API. Swap the first entry when the domain is live.
      *
-     * It also has to be first for "Try it out" to work at all. The session is a
-     * SameSite=Strict cookie, so a request aimed at any origin other than the
-     * one holding it arrives unauthenticated and every guarded endpoint answers
-     * 401 — which reads as a broken API rather than the wrong server selected.
+     * Production sits first because Swagger UI selects the first entry, and the
+     * session is a SameSite=Strict cookie — a request aimed at any origin other
+     * than the one serving this page arrives without it, so every guarded
+     * endpoint would answer 401.
      */
     servers: [
-      { url: '/', description: 'This server' },
+      {
+        url: 'https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net',
+        description: 'Production',
+      },
       { url: `http://localhost:${String(config.http.apiPort)}`, description: 'Local' },
-      { url: 'https://api.movead.in', description: 'Production (custom domain)' },
     ],
     tags: [
       { name: 'health', description: 'Liveness and readiness probes' },

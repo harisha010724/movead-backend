@@ -7,16 +7,12 @@
   },
   "servers": [
     {
-      "url": "/",
-      "description": "This server"
+      "url": "https://movead-api-ena2d4b6atfkh0fk.centralindia-01.azurewebsites.net",
+      "description": "Production"
     },
     {
       "url": "http://localhost:8080",
       "description": "Local"
-    },
-    {
-      "url": "https://api.movead.in",
-      "description": "Production (custom domain)"
     }
   ],
   "tags": [
