@@ -147,7 +147,7 @@ async function establishAny(req: Request, audience: SessionAudience): Promise<vo
   setActor({ id: user.id, kind: 'user', audience: `movead-${audience}` });
 }
 
-function resolve(input: {
+async function resolve(input: {
   cookie: string | undefined;
   bearer: string | null;
   audience: SessionAudience;
@@ -156,9 +156,23 @@ function resolve(input: {
 
   const token = input.bearer as string;
 
-  return input.audience === 'driver'
-    ? authenticateBearer(token, input.audience)
-    : authenticate(token, input.audience);
+  if (input.audience !== 'driver') return authenticate(token, input.audience);
+
+  /*
+   * Driver has two clients and therefore two bearer formats:
+   *
+   * - the web portal sends the opaque session token returned by `/auth/login`;
+   * - the mobile app sends the JWT returned by `/driver-app/auth/login`.
+   *
+   * Try the session first because the web portal is the same session model as
+   * admin and advertiser. Fall back to the JWT only when it is not a valid
+   * driver session. Both paths still verify audience, expiry and revocation.
+   */
+  try {
+    return await authenticate(token, input.audience);
+  } catch {
+    return authenticateBearer(token, input.audience);
+  }
 }
 
 /**

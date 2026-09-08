@@ -108,6 +108,7 @@ describe('driver invitation and web login', () => {
     expect(login.body.audience).toBe('driver');
     expect(login.body.user.driverId).toBe((await onboardedDriverId(admin)).id);
     expect([login.headers['set-cookie']].flat().join(';')).toMatch(/movead_driver_session=/);
+    expect(typeof login.body.sessionToken).toBe('string');
 
     const me = await portal.get('/v1/auth/me').expect(200);
     expect(me.body.audience).toBe('driver');
@@ -116,6 +117,18 @@ describe('driver invitation and web login', () => {
     const profile = await portal.get('/v1/driver/me').expect(200);
     expect(profile.body.name).toBe(DRIVER.name);
     expect(profile.body.mobile).toBe(DRIVER.mobile);
+
+    /*
+     * The deployed web portal cannot use the cookie: its static-app host and
+     * the API host are different sites, and Incognito blocks the relaxed
+     * third-party form too. It therefore sends this same opaque session token
+     * as a bearer. Use a fresh agent with no cookie jar, or this assertion
+     * would pass for the wrong reason.
+     */
+    const bearerOnly = client().set('Authorization', `Bearer ${String(login.body.sessionToken)}`);
+    const bearerMe = await bearerOnly.get('/v1/auth/me').expect(200);
+    expect(bearerMe.body.audience).toBe('driver');
+    await bearerOnly.get('/v1/driver/me').expect(200);
   });
 
   /*
