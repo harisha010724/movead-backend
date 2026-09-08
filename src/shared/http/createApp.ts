@@ -11,6 +11,7 @@ import { ForbiddenError, RateLimitedError } from '../errors';
 import { logger } from '../logger';
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { forwardedFor } from './middleware/forwardedFor';
 import { requestContext } from './middleware/requestContext';
 
 export interface AppOptions {
@@ -35,6 +36,8 @@ export function createApp(options: AppOptions): Express {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
+  // Before everything, because everything downstream reads `req.ip`.
+  app.use(forwardedFor());
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(express.json({ limit: options.jsonLimit ?? '512kb' }));
