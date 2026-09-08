@@ -49,26 +49,39 @@ export async function signIn(): Promise<Agent> {
   return agent;
 }
 
+/** The same, for a test that authenticates by header instead of by cookie. */
+export async function signInWithToken(): Promise<{ agent: Agent; token: string }> {
+  const agent = client();
+  await bootstrap(agent);
+  const token = await enrolAndVerify(agent, ADMIN.email, ADMIN.password);
+  return { agent, token };
+}
+
 /**
  * Password, then first-time authenticator enrolment, then the code. The path
  * every admin walks once, and the only way an admin ever gets a session.
+ *
+ * Returns the session token as well as leaving it in the agent's cookie jar,
+ * because a portal served from another site has to send it by hand.
  */
 export async function enrolAndVerify(
   agent: Agent,
   email: string,
   password: string,
-): Promise<void> {
+): Promise<string> {
   const login = await agent.post('/v1/auth/login').send({ email, password }).expect(200);
   const enrol = await agent
     .post('/v1/auth/mfa/enrol')
     .send({ challengeToken: login.body.challengeToken })
     .expect(200);
 
-  await agent
+  const verified = await agent
     .post('/v1/auth/mfa/verify')
     .send({
       challengeToken: login.body.challengeToken,
       code: await currentTotp(String(enrol.body.secret)),
     })
     .expect(200);
+
+  return String(verified.body.sessionToken);
 }

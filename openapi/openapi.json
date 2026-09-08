@@ -3669,12 +3669,17 @@
               },
               "user": {
                 "$ref": "#/components/schemas/AdminUser"
+              },
+              "sessionToken": {
+                "type": "string",
+                "description": "Send as `Authorization: Bearer <token>` where the session cookie cannot reach the API. Prefer the cookie when the portal and the API share an origin."
               }
             },
             "required": [
               "status",
               "audience",
-              "user"
+              "user",
+              "sessionToken"
             ]
           },
           {
@@ -3729,12 +3734,17 @@
           },
           "user": {
             "$ref": "#/components/schemas/AdminUser"
+          },
+          "sessionToken": {
+            "type": "string",
+            "description": "Send as `Authorization: Bearer <token>` where the session cookie cannot reach the API. Prefer the cookie when the portal and the API share an origin."
           }
         },
         "required": [
           "status",
           "audience",
-          "user"
+          "user",
+          "sessionToken"
         ]
       },
       "DriverAppTokens": {

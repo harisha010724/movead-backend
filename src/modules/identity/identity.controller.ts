@@ -36,7 +36,12 @@ export async function login(req: Request, res: Response): Promise<void> {
   // alone, so this branch has a cookie to set. Admin never reaches it.
   if (outcome.status === 'authenticated') {
     setSession(req, res, outcome.issued);
-    res.json({ status: outcome.status, audience: outcome.audience, user: outcome.issued.user });
+    res.json({
+      status: outcome.status,
+      audience: outcome.audience,
+      user: outcome.issued.user,
+      sessionToken: outcome.issued.token,
+    });
     return;
   }
 
@@ -96,7 +101,12 @@ export async function verifyMfa(req: Request, res: Response): Promise<void> {
   });
 
   setSession(req, res, issued);
-  res.json({ status: 'authenticated', audience: issued.session.audience, user: issued.user });
+  res.json({
+    status: 'authenticated',
+    audience: issued.session.audience,
+    user: issued.user,
+    sessionToken: issued.token,
+  });
 }
 
 export function me(req: Request, res: Response): void {

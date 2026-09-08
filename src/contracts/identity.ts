@@ -66,6 +66,25 @@ export const LoginRequestSchema = registry.register(
  * `audience` is present on every outcome so the shared login page knows which
  * portal to send the browser to.
  */
+/**
+ * The session token, returned alongside the cookie rather than instead of it.
+ *
+ * A portal served from a different site than the API never receives the
+ * cookie: `SameSite=Strict` withholds it, and `None` turns it into a
+ * third-party cookie, which Chrome blocks in Incognito and is retiring
+ * generally. Such a portal sends this value as `Authorization: Bearer` and is
+ * authenticated by the same row in `user_sessions` the cookie would have
+ * named — same expiry, same revocation, no additional reach.
+ *
+ * Same-origin deployments should ignore it and let the cookie work, which
+ * keeps the session out of JavaScript's reach. Whatever holds this value can
+ * be read by an XSS, which is the protection `httpOnly` exists to give.
+ */
+const SessionTokenSchema = z.string().openapi({
+  description:
+    'Send as `Authorization: Bearer <token>` where the session cookie cannot reach the API. Prefer the cookie when the portal and the API share an origin.',
+});
+
 export const LoginResponseSchema = registry.register(
   'LoginResponse',
   z.discriminatedUnion('status', [
@@ -73,6 +92,7 @@ export const LoginResponseSchema = registry.register(
       status: z.literal('authenticated'),
       audience: AudienceSchema,
       user: AdminUserSchema,
+      sessionToken: SessionTokenSchema,
     }),
     z.object({
       status: z.enum(['mfa_required', 'mfa_enrolment_required']),
@@ -89,6 +109,7 @@ export const SessionResponseSchema = registry.register(
     status: z.literal('authenticated'),
     audience: AudienceSchema,
     user: AdminUserSchema,
+    sessionToken: SessionTokenSchema,
   }),
 );
 
