@@ -55,14 +55,21 @@ const EnvSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   INGESTION_PORT: z.coerce.number().int().min(1).max(65535).default(8081),
 
+  /** Comma-separated deployed and local web portal origins. */
+  CORS_ORIGINS: z.string().default('http://localhost:5173,http://localhost:5174'),
+
   /**
-   * Comma-separated. The advertiser and admin portals are separate origins, and
-   * 8081 is `movead-mobile`'s browser preview. The Android build sends no
-   * `Origin` header, so it needs no entry — only the preview does.
+   * Browser previews of native clients, kept separate from CORS_ORIGINS.
+   *
+   * Azure supplies CORS_ORIGINS and therefore replaces its schema default.
+   * Keeping the Expo preview in that default made it disappear only after
+   * deployment. The Android application sends no Origin header and needs no
+   * entry; this is solely for `expo start --web` on Metro's port 8081.
+   *
+   * Set this to an empty value in a deployment where production data must not
+   * be reachable from a local browser preview.
    */
-  CORS_ORIGINS: z
-    .string()
-    .default('http://localhost:5173,http://localhost:5174,http://localhost:8081'),
+  CORS_PREVIEW_ORIGINS: z.string().default('http://localhost:8081'),
 
   /**
    * Where each portal lives, for links the server puts in an email.
@@ -276,9 +283,14 @@ export const config = {
   http: {
     apiPort: env.API_PORT,
     ingestionPort: env.INGESTION_PORT,
-    corsOrigins: env.CORS_ORIGINS.split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean),
+    corsOrigins: [
+      ...new Set(
+        [env.CORS_ORIGINS, env.CORS_PREVIEW_ORIGINS]
+          .flatMap((origins) => origins.split(','))
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      ),
+    ],
     rateLimit: { windowMs: env.RATE_LIMIT_WINDOW_MS, max: env.RATE_LIMIT_MAX },
     docsEnabled: env.DOCS_ENABLED,
   },
