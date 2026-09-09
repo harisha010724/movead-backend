@@ -18,11 +18,19 @@ import * as controller from './dashboards.controller';
 export function adminDashboardRoutes(): Router {
   const router = Router();
 
-  router.use(requireAuth('admin'));
-
   // `campaign.read` rather than a new key: this is the question the campaign
   // list already answers, asked across every campaign at once.
-  router.get('/admin', requirePermission('campaign.read'), controller.admin);
+  //
+  // The audience guard belongs on the route, not on the router. Both dashboard
+  // routers mount at `/dashboard`, and Express enters the admin router first.
+  // A router-wide admin guard therefore rejected `/dashboard/advertiser`
+  // before that router had a chance to see it.
+  router.get(
+    '/admin',
+    requireAuth('admin'),
+    requirePermission('campaign.read'),
+    controller.admin,
+  );
 
   return router;
 }
@@ -31,9 +39,12 @@ export function adminDashboardRoutes(): Router {
 export function advertiserDashboardRoutes(): Router {
   const router = Router();
 
-  router.use(requireAuth('advertiser'));
-
-  router.get('/advertiser', requirePermission('advertiser.report.read'), controller.advertiser);
+  router.get(
+    '/advertiser',
+    requireAuth('advertiser'),
+    requirePermission('advertiser.report.read'),
+    controller.advertiser,
+  );
 
   return router;
 }

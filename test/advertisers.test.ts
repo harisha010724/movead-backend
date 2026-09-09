@@ -146,6 +146,29 @@ describe('advertiser onboarding', () => {
     // approve kilometres and release money.
     expect(me.body.permissions).not.toContain('payout.release');
     expect(me.body.permissions).not.toContain('driver.approve');
+
+    /*
+     * The deployed portal is hosted on a different site from the API, so its
+     * cookie cannot be relied on. Use a fresh client with no cookie jar and the
+     * token returned by login: this is the exact credential the browser sends
+     * on `/dashboard/advertiser`.
+     */
+    expect(typeof login.body.sessionToken).toBe('string');
+    const bearerOnly = client().set(
+      'Authorization',
+      `Bearer ${String(login.body.sessionToken)}`,
+    );
+
+    const bearerMe = await bearerOnly.get('/v1/auth/me').expect(200);
+    expect(bearerMe.body.advertiserId).toBe(advertiserId);
+
+    // No campaign exists for this new advertiser, so 404 is the truthful
+    // dashboard result. The important assertion is that authentication got
+    // past the guard and the endpoint did not answer 401.
+    const dashboard = await bearerOnly
+      .get('/api/v1/dashboard/advertiser')
+      .query({ from: '2026-09-09', to: '2026-09-09' });
+    expect(dashboard.status).toBe(404);
   });
 });
 
