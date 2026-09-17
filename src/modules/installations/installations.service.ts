@@ -486,6 +486,32 @@ export async function rejectInstallation(input: {
   return toAssignmentView(await loadAssignment(assignment.id));
 }
 
+/**
+ * The installer's queue: wraps still to be fitted and photographed.
+ *
+ * The counterpart of `reviewQueue`, and the reason both exist. An installation
+ * before submission appeared on no screen at all, so a campaign could be
+ * marked installed at the campaign level while the vehicle's own record sat in
+ * SCHEDULED forever — and the driver waited on a step nobody could see, with
+ * tracking refused because AC-07 reads that record rather than the campaign.
+ *
+ * REJECTED belongs here, not in review: it is a wrap to redo (AC-06.9).
+ */
+export async function fittingQueue(): Promise<AssignmentView[]> {
+  const pending = await Installation.findAll({
+    where: { status: { [Op.in]: ['SCHEDULED', 'IN_PROGRESS', 'REJECTED'] } },
+    order: [['createdAt', 'ASC']],
+  });
+
+  const rows = await Promise.all(
+    pending.map((installation) => loadAssignment(installation.campaignVehicleId)),
+  );
+
+  // A vehicle taken off the campaign keeps its installation row. Nobody is
+  // going to fit that wrap, so it is not work.
+  return Promise.all(rows.filter((row) => LIVE_ASSIGNMENT.includes(row.status)).map(toAssignmentView));
+}
+
 /** The admin review queue: everything waiting on a decision. */
 export async function reviewQueue(): Promise<AssignmentView[]> {
   const installations = await Installation.findAll({

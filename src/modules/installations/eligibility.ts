@@ -88,19 +88,13 @@ export async function eligibility(driverId: string): Promise<Eligibility> {
       id: 'installation_verified',
       label: 'Installation verified',
       passed: installation?.status === 'APPROVED',
-      remedy:
-        installation?.status === 'APPROVED'
-          ? null
-          : 'Operations is still checking the wrap photos.',
+      remedy: installationVerifiedRemedy(installation?.status ?? null),
     },
     {
       id: 'campaign_active',
       label: 'Campaign active',
       passed: campaign?.status === 'ACTIVE' && assignment?.status === 'ACTIVE',
-      remedy:
-        campaign?.status === 'ACTIVE' && assignment?.status === 'ACTIVE'
-          ? null
-          : 'The campaign has not started running yet.',
+      remedy: campaignActiveRemedy(campaign?.status ?? null, assignment?.status ?? null),
     },
   ];
 
@@ -116,4 +110,34 @@ function adInstalledRemedy(status: string | null, rejectionReason: string | null
   if (status === 'SUBMITTED' || status === 'APPROVED') return null;
   if (status === 'REJECTED') return rejectionReason ?? 'The wrap needs to be redone.';
   return 'Book your installation appointment to get the wrap fitted.';
+}
+
+/** Nothing is being checked until it has been sent, so do not claim it is. */
+function installationVerifiedRemedy(status: string | null): string | null {
+  if (status === 'APPROVED') return null;
+  if (status === 'SUBMITTED') return 'Operations is still checking the wrap photos.';
+  if (status === 'REJECTED') return 'The wrap photos were rejected and have to be taken again.';
+  return 'The wrap photos have not been sent for checking yet.';
+}
+
+/**
+ * The campaign and this vehicle's place on it are two different things, and
+ * conflating them produced the worst message in the app: a campaign running on
+ * other vehicles told this driver it "has not started running yet", so the
+ * person who could have chased the real blocker — their own unverified wrap —
+ * waited for a date instead.
+ */
+function campaignActiveRemedy(
+  campaignStatus: string | null,
+  assignmentStatus: string | null,
+): string | null {
+  if (campaignStatus === 'ACTIVE' && assignmentStatus === 'ACTIVE') return null;
+  if (campaignStatus === 'PAUSED') return 'The campaign is paused.';
+  if (campaignStatus === 'COMPLETED' || campaignStatus === 'STOPPED') {
+    return 'The campaign has finished.';
+  }
+  if (campaignStatus === 'ACTIVE') {
+    return 'The campaign is running, but your vehicle is not on it until the wrap is verified.';
+  }
+  return 'The campaign has not started running yet.';
 }

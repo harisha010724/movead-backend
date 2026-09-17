@@ -56,6 +56,10 @@ export async function queue(_req: Request, res: Response): Promise<void> {
   res.json({ items: await installations.reviewQueue() });
 }
 
+export async function fitting(_req: Request, res: Response): Promise<void> {
+  res.json({ items: await installations.fittingQueue() });
+}
+
 export async function photos(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
   res.json({ items: await installations.listPhotos(id) });

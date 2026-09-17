@@ -36,6 +36,14 @@ const DRIVER = {
   },
 };
 
+/** A second driver, for the tests needing two. AC-05.7 makes both unique. */
+const OTHER_DRIVER = {
+  ...DRIVER,
+  mobile: '9845067890',
+  name: 'Anita Rao',
+  email: 'anita.rao@example.com',
+};
+
 const CAMPAIGN = {
   name: 'Summer Sale',
   brandName: 'Zephyr',
@@ -257,6 +265,49 @@ describe('installation evidence (AC-06)', () => {
 
     expect(queue.body.items).toHaveLength(1);
     expect(queue.body.items[0].installation.status).toBe('SUBMITTED');
+  });
+
+  /*
+   * The two queues have to cover the whole of AC-06 between them. An
+   * installation that is in neither is work nobody can see, and the driver
+   * waiting on it cannot start tracking.
+   */
+  it('lists what is waiting on a wrap, until it is sent for review', async () => {
+    const assignmentId = await assignedVehicle();
+
+    const pending = await admin.get('/v1/admin/installations/pending').expect(200);
+    expect(pending.body.items).toHaveLength(1);
+    expect(pending.body.items[0].id).toBe(assignmentId);
+    expect(pending.body.items[0].installation.status).toBe('SCHEDULED');
+
+    for (const angle of ['FRONT', 'REAR', 'LEFT', 'RIGHT']) {
+      await uploadPhoto(assignmentId, angle);
+    }
+    await admin.post(`/v1/admin/assignments/${assignmentId}/submit`).expect(200);
+
+    expect((await admin.get('/v1/admin/installations/pending').expect(200)).body.items).toHaveLength(
+      0,
+    );
+    expect((await admin.get('/v1/admin/installations').expect(200)).body.items).toHaveLength(1);
+  });
+
+  /* AC-06.9: a rejected wrap is work again, not a decision awaiting review. */
+  it('returns a rejected installation to the fitting queue', async () => {
+    const { assignmentId } = await submittedInstallation();
+    const approver = await secondAdmin();
+
+    await approver
+      .post(`/v1/admin/assignments/${assignmentId}/reject`)
+      .send({ reason: REASON })
+      .expect(200);
+
+    const pending = await admin.get('/v1/admin/installations/pending').expect(200);
+
+    expect(pending.body.items).toHaveLength(1);
+    expect(pending.body.items[0].installation).toMatchObject({
+      status: 'REJECTED',
+      rejectionReason: REASON,
+    });
   });
 });
 
@@ -691,6 +742,40 @@ describe('tracking eligibility (AC-07)', () => {
     expect(byId(checksOf(eligibility.body), 'installation_verified').passed).toBe(false);
   });
 
+  /*
+   * The remedies are the only part of this a driver acts on, so they have to
+   * describe the state the driver is actually in. Saying the photos are being
+   * checked when none were sent sends them to wait instead of to the fitter.
+   */
+  it('names the blocker the driver has, not the one further down the line', async () => {
+    const { driverId } = await assignedVehicleWithDriver();
+    const driver = await signInDriver(driverId);
+
+    const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
+
+    expect(byId(checks, 'installation_verified').remedy).toMatch(/not been sent/i);
+    expect(byId(checks, 'installation_verified').remedy).not.toMatch(/still checking/i);
+  });
+
+  it('does not tell a driver on a running campaign that it has not started', async () => {
+    const { assignmentId, campaignId } = await submittedInstallation();
+    await (await secondAdmin()).post(`/v1/admin/assignments/${assignmentId}/approve`).expect(200);
+
+    // A second vehicle joins the campaign that is now running. Its driver is
+    // blocked by their own wrap, which is not the campaign not having started.
+    const second = await approvedDriverWithVehicle(OTHER_DRIVER, 'KA05MN9013');
+    await admin
+      .post(`/v1/admin/campaigns/${campaignId}/vehicles`)
+      .send({ vehicleIds: [second.vehicleId] })
+      .expect(201);
+
+    const driver = await signInDriver(second.driverId, OTHER_DRIVER.email);
+    const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
+
+    expect(byId(checks, 'campaign_active').passed).toBe(false);
+    expect(byId(checks, 'campaign_active').remedy).toMatch(/running, but your vehicle/i);
+  });
+
   it('unlocks only after the installation is approved', async () => {
     const { assignmentId, driverId } = await submittedInstallation();
     await (await secondAdmin()).post(`/v1/admin/assignments/${assignmentId}/approve`).expect(200);
@@ -979,23 +1064,31 @@ async function secondAdmin(): Promise<Agent> {
   return agent;
 }
 
-async function createDriver(): Promise<string> {
-  const response = await admin.post('/v1/admin/drivers').send(DRIVER).expect(201);
+async function createDriver(fixture = DRIVER): Promise<string> {
+  const response = await admin.post('/v1/admin/drivers').send(fixture).expect(201);
   return String(response.body.driver.id);
 }
 
-async function createVehicle(driverId: string): Promise<string> {
+async function createVehicle(driverId: string, registration = 'KA05MN9012'): Promise<string> {
   const response = await admin
     .post(`/v1/admin/drivers/${driverId}/vehicles`)
-    .send({ registrationNumber: 'KA05MN9012', category: 'CAB' })
+    .send({ registrationNumber: registration, category: 'CAB' })
     .expect(201);
   return String(response.body.id);
 }
 
-/** A driver and vehicle both approved, which is where AC-22 assignment starts. */
-async function approvedDriverWithVehicle(): Promise<{ driverId: string; vehicleId: string }> {
-  const driverId = await createDriver();
-  const vehicleId = await createVehicle(driverId);
+/**
+ * A driver and vehicle both approved, which is where AC-22 assignment starts.
+ *
+ * The fixture is a parameter because a mobile number and a plate are unique
+ * platform-wide (AC-05.7), so a test wanting two drivers cannot reuse one.
+ */
+async function approvedDriverWithVehicle(
+  fixture = DRIVER,
+  registration = 'KA05MN9012',
+): Promise<{ driverId: string; vehicleId: string }> {
+  const driverId = await createDriver(fixture);
+  const vehicleId = await createVehicle(driverId, registration);
 
   const licence = await uploadDocument({ driverId, kind: 'LICENCE' });
   await admin.post(`/v1/admin/documents/${licence}/verify`).expect(200);
@@ -1037,11 +1130,11 @@ async function uploadDocument(input: {
  * other five. Withholding it would make them all fail for the wrong reason.
  * The consent gate itself is proved in `driver-profile.test.ts`.
  */
-async function signInDriver(_driverId: string): Promise<Agent> {
+async function signInDriver(_driverId: string, email = DRIVER.email): Promise<Agent> {
   const agent = client();
   await agent
     .post('/v1/auth/login')
-    .send({ email: DRIVER.email, password: inbox.passwordFor(DRIVER.email) })
+    .send({ email, password: inbox.passwordFor(email) })
     .expect(200);
   await agent.put('/v1/driver/me/consent').send({ granted: true }).expect(200);
   return agent;

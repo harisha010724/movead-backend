@@ -253,6 +253,23 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get',
+  path: '/v1/admin/installations/pending',
+  tags: ['admin-installations'],
+  summary: 'Installations awaiting a wrap and its photos',
+  description:
+    'Requires `installation.upload`. Everything in SCHEDULED, IN_PROGRESS or REJECTED on a live assignment, oldest first — the work before review rather than after it. A rejected wrap is listed here because it has to be redone (AC-06.9).',
+  security: [{ cookieAuth: [] }],
+  responses: {
+    200: {
+      description: 'Queue.',
+      content: json(z.object({ items: z.array(AssignmentSchema) })),
+    },
+    401: commonErrorResponses[401],
+  },
+});
+
+registry.registerPath({
   method: 'post',
   path: '/v1/admin/assignments/{id}/photos',
   tags: ['admin-installations'],

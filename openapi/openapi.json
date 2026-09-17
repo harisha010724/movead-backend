@@ -10173,6 +10173,53 @@
         }
       }
     },
+    "/v1/admin/installations/pending": {
+      "get": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "Installations awaiting a wrap and its photos",
+        "description": "Requires `installation.upload`. Everything in SCHEDULED, IN_PROGRESS or REJECTED on a live assignment, oldest first — the work before review rather than after it. A rejected wrap is listed here because it has to be redone (AC-06.9).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CampaignVehicleAssignment"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/assignments/{id}/photos": {
       "post": {
         "tags": [

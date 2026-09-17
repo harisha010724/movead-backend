@@ -67,6 +67,13 @@ export function adminInstallationRoutes(): Router {
   );
 
   router.get('/installations', requirePermission('installation.review'), controller.queue);
+  // Ahead of no other route, but kept beside its sibling: this is the half of
+  // the queue the installer owns, and `installation.upload` is who may see it.
+  router.get(
+    '/installations/pending',
+    requirePermission('installation.upload'),
+    controller.fitting,
+  );
   router.get(
     '/assignments/:id/photos',
     requirePermission('installation.review'),
