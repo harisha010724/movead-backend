@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Client } from 'pg';
 
-import { databaseName, maintenanceUrl, testDatabaseUrl } from './databaseUrl';
+import { databaseName, maintenanceUrl, testDatabaseSsl, testDatabaseUrl } from './databaseUrl';
 
 const run = promisify(execFile);
 
@@ -14,7 +14,11 @@ const run = promisify(execFile);
  * which is the failure this whole arrangement exists to prevent.
  */
 async function prepareDatabase(url: string): Promise<boolean> {
-  const admin = new Client({ connectionString: maintenanceUrl(url) });
+  const ssl = testDatabaseSsl();
+  const admin = new Client({
+    connectionString: maintenanceUrl(url),
+    ...(ssl ? { ssl: { rejectUnauthorized: false } } : {}),
+  });
 
   try {
     await admin.connect();
@@ -37,7 +41,9 @@ async function prepareDatabase(url: string): Promise<boolean> {
   }
 
   await run('npx', ['sequelize-cli', 'db:migrate'], {
-    env: { ...process.env, DATABASE_URL: url },
+    // `DATABASE_SSL` as well as the URL: `src/db/config.js` reads both through
+    // dotenv, and the development file's value belongs to a different server.
+    env: { ...process.env, DATABASE_URL: url, DATABASE_SSL: String(ssl) },
     shell: process.platform === 'win32',
   });
 

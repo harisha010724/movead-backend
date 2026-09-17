@@ -197,7 +197,16 @@ export const AvailableVehiclesRequestSchema = registry.register(
   'AvailableVehiclesRequest',
   z.object({
     vehicleType: CampaignVehicleTypeSchema,
-    zonePolygons: ZonePolygonsSchema,
+    city: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'The campaign\'s city. Narrows the list to vehicles based there; omit to browse every city.',
+      ),
+    zonePolygons: ZonePolygonsSchema.describe(
+      'The draft outlines. These tier the result rather than filter it — send `{}` before anything is drawn and every vehicle comes back as `network`.',
+    ),
   }),
 );
 
@@ -209,7 +218,11 @@ export const AvailableVehicleSchema = registry.register(
     areaLabel: z.string(),
     lat: z.number().describe('The onboard pin, so the picker can map the vehicle.'),
     lng: z.number(),
-    zone: z.enum(['prime', 'secondary']),
+    zone: z
+      .enum(['prime', 'secondary', 'network'])
+      .describe(
+        'Which drawn outline the vehicle\'s pin falls in. `network` is everywhere the outlines do not reach, billed at the network rate — a valid choice, not an unavailable one.',
+      ),
     status: z.string(),
     availability: z.enum(['available', 'booked', 'pending']).describe(
       'What a buyer can do with it now. Only `available` may be selected: `booked` is already carrying a live campaign (AC-22.6) and `pending` has not been approved by operations.',
@@ -245,6 +258,7 @@ export const AvailableVehiclesResponseSchema = registry.register(
     items: z.array(AvailableVehicleSchema),
     primeCount: z.number().int(),
     secondaryCount: z.number().int(),
+    networkCount: z.number().int().describe('Listed vehicles outside both outlines.'),
     availableCount: z.number().int().describe('Of the listed vehicles, how many can be ordered.'),
   }),
 );
@@ -319,13 +333,13 @@ registry.registerPath({
   method: 'post',
   path: '/v1/admin/vehicles/in-zones',
   tags: ['admin-vehicles'],
-  summary: 'Vehicles whose operating pin sits in Prime or Secondary',
+  summary: 'Selectable vehicles, tiered by the drawn zones',
   description:
-    'Same matching as the advertiser browse, but includes driver name and plate for operations. Requires `vehicle.read`.',
+    'Same list as the advertiser browse, but includes driver name and plate for operations. Requires `vehicle.read`.',
   security: [{ cookieAuth: [] }],
   request: { body: { content: json(AvailableVehiclesRequestSchema) } },
   responses: {
-    200: { description: 'Vehicles in the drawn zones.', content: json(AvailableVehiclesResponseSchema) },
+    200: { description: 'The fleet, each vehicle tiered.', content: json(AvailableVehiclesResponseSchema) },
     400: commonErrorResponses[400],
     401: commonErrorResponses[401],
   },
@@ -335,13 +349,13 @@ registry.registerPath({
   method: 'post',
   path: '/v1/campaigns/available-vehicles',
   tags: ['campaigns'],
-  summary: 'Vehicles whose operating pin sits in Prime or Secondary',
+  summary: 'Selectable vehicles, tiered by the drawn zones',
   description:
-    'Requires `advertiser.vehicle.select`. Matching is the driver’s onboard pin against the draft outlines. Identity is withheld (no name, no plate). Assignment still needs admin confirmation (AC-22.4).',
+    'Requires `advertiser.vehicle.select`. Returns the city’s fleet; the draft outlines tier each vehicle by its onboard pin rather than filtering the list, so this is answerable before anything is drawn. The driver’s name is withheld; the plate is not. Assignment still needs admin confirmation (AC-22.4).',
   security: [{ cookieAuth: [] }],
   request: { body: { content: json(AvailableVehiclesRequestSchema) } },
   responses: {
-    200: { description: 'Vehicles in the drawn zones.', content: json(AvailableVehiclesResponseSchema) },
+    200: { description: 'The fleet, each vehicle tiered.', content: json(AvailableVehiclesResponseSchema) },
     400: commonErrorResponses[400],
     401: commonErrorResponses[401],
   },

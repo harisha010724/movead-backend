@@ -1,4 +1,4 @@
-import { testDatabaseUrl } from './databaseUrl';
+import { testDatabaseSsl, testDatabaseUrl } from './databaseUrl';
 
 /**
  * Runs before any test file imports application code, which matters because
@@ -13,6 +13,10 @@ process.env.LOG_LEVEL = 'silent';
  * `databaseUrl.ts`.
  */
 process.env.DATABASE_URL = testDatabaseUrl();
+// Assigned alongside the URL, because the two describe one server: `.env` has
+// TLS on for the Azure development database, and leaving that set while the
+// URL points at a local Postgres fails every connection in the suite.
+process.env.DATABASE_SSL = String(testDatabaseSsl());
 process.env.JWT_ACCESS_SECRET ??= 'test-secret-value-long-enough-to-pass-validation';
 process.env.JWT_REFRESH_SECRET ??= 'test-refresh-secret-long-enough-to-pass-check';
 

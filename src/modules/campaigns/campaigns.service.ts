@@ -34,7 +34,6 @@ const EDITABLE_STATUSES = new Set<CampaignStatus>([
 ]);
 
 const MINIMUM_DAYS = 7;
-const MINIMUM_BUDGET = money(10_000);
 const MAX_CREATIVE_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_TYPES = {
   'image/png': 'png',
@@ -132,9 +131,6 @@ export async function createForAdvertiser(input: {
 }): Promise<CampaignView> {
   assertDates(input.startDate, input.endDate);
   const zones = zoneBudgets(input);
-  if (zones.budget.lt(MINIMUM_BUDGET)) {
-    throw new BadRequestError('Minimum campaign budget is ₹10,000 (Prime km × ₹5 + Secondary km × ₹2).');
-  }
 
   const requestedVehicleIds = await assertRequestedVehicles(
     input.requestedVehicleIds ?? [],
@@ -226,9 +222,6 @@ export async function updateForAdvertiser(input: {
 
   assertDates(input.startDate, input.endDate);
   const zones = zoneBudgets(input);
-  if (zones.budget.lt(MINIMUM_BUDGET)) {
-    throw new BadRequestError('Minimum campaign budget is ₹10,000 (Prime km × ₹5 + Secondary km × ₹2).');
-  }
 
   const requestedVehicleIds = await assertRequestedVehicles(
     input.requestedVehicleIds ?? [],

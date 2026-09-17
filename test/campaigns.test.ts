@@ -325,6 +325,11 @@ describe('advertiser campaigns', () => {
       .expect(200);
     expect(autosOnly.body.items).toHaveLength(0);
 
+    /*
+     * An outline that encloses nothing does not empty the list: the vehicle is
+     * still orderable, it just bills at the network rate. Dropping it here was
+     * what forced a buyer to draw a shape before being shown any supply.
+     */
     const outside = await portal.post('/v1/campaigns/available-vehicles').send({
       vehicleType: 'CAB',
       zonePolygons: {
@@ -339,7 +344,37 @@ describe('advertiser campaigns', () => {
       },
     });
 
-    expect(outside.body.items).toHaveLength(0);
+    expect(outside.body.items).toHaveLength(1);
+    expect(outside.body.items[0].zone).toBe('network');
+    expect(outside.body.networkCount).toBe(1);
+    expect(outside.body.secondaryCount).toBe(0);
+
+    // Nothing drawn at all is the state the picker opens in, and it has to
+    // answer rather than wait for a shape.
+    const undrawn = await portal
+      .post('/v1/campaigns/available-vehicles')
+      .send({ vehicleType: 'CAB', zonePolygons: {} })
+      .expect(200);
+
+    expect(undrawn.body.items).toHaveLength(1);
+    expect(undrawn.body.items[0].zone).toBe('network');
+
+    // City narrows the list; a campaign in one city must not be offered
+    // vehicles based in another.
+    const elsewhere = await portal
+      .post('/v1/campaigns/available-vehicles')
+      .send({ vehicleType: 'CAB', city: 'Mysuru', zonePolygons: {} })
+      .expect(200);
+
+    expect(elsewhere.body.items).toHaveLength(0);
+
+    const here = await portal
+      .post('/v1/campaigns/available-vehicles')
+      .send({ vehicleType: 'CAB', city: 'bengaluru', zonePolygons: {} })
+      .expect(200);
+
+    // Matched case-insensitively: the driver's city was typed by an operator.
+    expect(here.body.items).toHaveLength(1);
   });
 
   it('reports each vehicle as available, booked, or pending, and reveals identity to admin only', async () => {

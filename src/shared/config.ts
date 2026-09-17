@@ -53,7 +53,8 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   API_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
-  INGESTION_PORT: z.coerce.number().int().min(1).max(65535).default(8081),
+  /** Not 8081: Metro serves `movead-mobile`'s web preview there. */
+  INGESTION_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
 
   /** Comma-separated deployed and local web portal origins. */
   CORS_ORIGINS: z.string().default('http://localhost:5173,http://localhost:5174'),

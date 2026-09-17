@@ -30,6 +30,27 @@ export function testDatabaseUrl(): string {
   return url.toString();
 }
 
+/**
+ * Whether the test database speaks TLS.
+ *
+ * Deliberately not just `DATABASE_SSL`. Development points at Azure, which
+ * refuses a plaintext connection, while the suite runs against a local
+ * Postgres that refuses an encrypted one — so the development setting applied
+ * to the test database fails the migration with "The server does not support
+ * SSL connections", which reads as a broken harness rather than as one
+ * database's setting reaching the other.
+ *
+ * An explicitly named `TEST_DATABASE_URL` is somewhere other than the
+ * development server, so it does not inherit; without one the test database is
+ * a sibling on the same server, and does.
+ */
+export function testDatabaseSsl(): boolean {
+  const explicit = process.env.TEST_DATABASE_SSL;
+  if (explicit) return explicit === 'true';
+  if (process.env.TEST_DATABASE_URL) return false;
+  return process.env.DATABASE_SSL === 'true';
+}
+
 /** The maintenance database used to issue `CREATE DATABASE`. */
 export function maintenanceUrl(databaseUrl: string): string {
   const url = new URL(databaseUrl);

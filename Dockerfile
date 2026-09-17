@@ -29,7 +29,7 @@ COPY src/db/config.js ./src/db/config.js
 COPY .sequelizerc ./.sequelizerc
 
 USER node
-EXPOSE 8080 8081
+EXPOSE 8080 3001
 
 # Overridden per service: start:api | start:ingestion | start:worker
 CMD ["node", "dist/entrypoints/api.js"]

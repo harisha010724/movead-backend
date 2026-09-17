@@ -1324,7 +1324,7 @@ function availabilityOf(status: VehicleStatus, assigned: boolean): VehicleAvaila
   return READY_VEHICLE.includes(status) ? 'available' : 'pending';
 }
 
-export interface VehicleInZone {
+export interface SelectableVehicle {
   id: string;
   vehicleType: VehicleCategory;
   publicRef: string;
@@ -1333,7 +1333,8 @@ export interface VehicleInZone {
   /** The onboard pin, so the picker can plot the vehicle beside its zone. */
   lat: number;
   lng: number;
-  zone: 'prime' | 'secondary';
+  /** `network` is everywhere the outlines do not reach — see `selectableVehicles`. */
+  zone: 'prime' | 'secondary' | 'network';
   status: VehicleStatus;
   availability: VehicleAvailability;
   /** When a `booked` vehicle comes free: the end date of the campaign on it. */
@@ -1343,7 +1344,19 @@ export interface VehicleInZone {
 }
 
 /**
- * Vehicles whose onboard pin sits inside the draft Prime or Secondary outline.
+ * The fleet a campaign can choose from, each vehicle tagged with the zone its
+ * onboard pin falls in.
+ *
+ * This used to return only vehicles inside the drawn outlines, which made the
+ * picker unusable in the order the work actually happens: a buyer had to guess
+ * a shape before being shown any supply, and an empty list could equally mean
+ * "no vehicles here" or "you have not drawn anything yet". Now the city's fleet
+ * is always listed and the outlines only decide the *tier* — so drawing becomes
+ * a pricing decision, which is what it really is.
+ *
+ * `network` is not a drawn zone. It is everywhere the outlines do not reach,
+ * billed at the network rate, so a vehicle outside both is a legitimate choice
+ * rather than an unavailable one.
  *
  * **The plate is shown to advertisers; the driver's name is not.** `ADV-039`
  * withholds driver *personal information*, and the line now sits between the
@@ -1356,37 +1369,29 @@ export interface VehicleInZone {
  * as such: hiding them would tell an advertiser the area is empty when it is
  * merely busy, which is a different decision.
  */
-export async function vehiclesInZones(input: {
+export async function selectableVehicles(input: {
   vehicleType: VehicleCategory;
+  /** The campaign's city. Omitted by callers that browse every city. */
+  city?: string;
   zonePolygons: ZonePolygons;
   revealIdentity: boolean;
 }): Promise<{
-  items: VehicleInZone[];
+  items: SelectableVehicle[];
   primeCount: number;
   secondaryCount: number;
+  networkCount: number;
   availableCount: number;
 }> {
-  const rows = await repo.vehiclesWithBaseLocation(input.vehicleType);
-  const inZone: { vehicle: (typeof rows)[number]; zone: 'prime' | 'secondary' }[] = [];
-
-  for (const vehicle of rows) {
-    const driver = vehicle.driver;
-    if (!driver?.baseLat || !driver.baseLng) continue;
-
-    const zone = zoneForPoint(
-      { lat: Number(driver.baseLat), lng: Number(driver.baseLng) },
-      input.zonePolygons,
-    );
-    if (!zone) continue;
-    inZone.push({ vehicle, zone });
-  }
+  const rows = await repo.vehiclesWithBaseLocation(input.vehicleType, input.city);
+  const located = rows.filter((vehicle) => vehicle.driver?.baseLat && vehicle.driver.baseLng);
 
   // One query for the whole list, and the thing that decides `booked`.
-  const freeFrom = await repo.bookedUntilFor(inZone.map(({ vehicle }) => vehicle.id));
+  const freeFrom = await repo.bookedUntilFor(located.map((vehicle) => vehicle.id));
 
-  const items: VehicleInZone[] = inZone.map(({ vehicle, zone }) => {
+  const items: SelectableVehicle[] = located.map((vehicle) => {
     const driver = vehicle.driver!;
     const bookedUntil = freeFrom.get(vehicle.id);
+    const pin = { lat: Number(driver.baseLat), lng: Number(driver.baseLng) };
 
     return {
       id: vehicle.id,
@@ -1394,9 +1399,9 @@ export async function vehiclesInZones(input: {
       publicRef: publicVehicleRef(vehicle.id),
       registrationNumber: vehicle.registrationNumber,
       areaLabel: driver.baseLabel ?? driver.city,
-      lat: Number(driver.baseLat),
-      lng: Number(driver.baseLng),
-      zone,
+      lat: pin.lat,
+      lng: pin.lng,
+      zone: zoneForPoint(pin, input.zonePolygons) ?? 'network',
       status: vehicle.status,
       availability: availabilityOf(vehicle.status, Boolean(bookedUntil)),
       ...(bookedUntil ? { bookedUntil } : {}),
@@ -1408,6 +1413,7 @@ export async function vehiclesInZones(input: {
     items,
     primeCount: items.filter((row) => row.zone === 'prime').length,
     secondaryCount: items.filter((row) => row.zone === 'secondary').length,
+    networkCount: items.filter((row) => row.zone === 'network').length,
     availableCount: items.filter((row) => row.availability === 'available').length,
   };
 }

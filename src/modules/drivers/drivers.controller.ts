@@ -192,8 +192,9 @@ export async function availableFleet(req: Request, res: Response): Promise<void>
 export async function vehiclesInZones(req: Request, res: Response): Promise<void> {
   const body = parseBody(req, AvailableVehiclesRequestSchema);
   res.json(
-    await drivers.vehiclesInZones({
+    await drivers.selectableVehicles({
       vehicleType: body.vehicleType,
+      ...(body.city ? { city: body.city } : {}),
       zonePolygons: body.zonePolygons,
       revealIdentity: true,
     }),

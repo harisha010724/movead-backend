@@ -78,8 +78,16 @@ export function vehiclesFor(driverId: string): Promise<Vehicle[]> {
  *
  * Status filter is "not gone": REMOVED, REJECTED and SUSPENDED never match a
  * campaign zone. The caller decides whether PENDING is visible.
+ *
+ * `city` is matched case-insensitively. Both sides come from the same city
+ * list, but the driver's is typed by an operator during onboarding and a
+ * campaign that silently found no vehicles because of a capital letter would
+ * be read as "no supply here".
  */
-export function vehiclesWithBaseLocation(category?: Vehicle['category']): Promise<Vehicle[]> {
+export function vehiclesWithBaseLocation(
+  category?: Vehicle['category'],
+  city?: string,
+): Promise<Vehicle[]> {
   return Vehicle.findAll({
     where: {
       ...(category ? { category } : {}),
@@ -95,6 +103,7 @@ export function vehiclesWithBaseLocation(category?: Vehicle['category']): Promis
           baseLat: { [Op.not]: null },
           baseLng: { [Op.not]: null },
           status: { [Op.notIn]: ['SUSPENDED'] },
+          ...(city ? { city: { [Op.iLike]: city } } : {}),
         },
       },
     ],

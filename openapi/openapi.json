@@ -1100,6 +1100,11 @@
               "AUTO"
             ]
           },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The campaign's city. Narrows the list to vehicles based there; omit to browse every city."
+          },
           "zonePolygons": {
             "type": "object",
             "properties": {
@@ -1167,7 +1172,8 @@
                   "path"
                 ]
               }
-            }
+            },
+            "description": "The draft outlines. These tier the result rather than filter it — send `{}` before anything is drawn and every vehicle comes back as `network`."
           }
         },
         "required": [
@@ -1203,8 +1209,10 @@
             "type": "string",
             "enum": [
               "prime",
-              "secondary"
-            ]
+              "secondary",
+              "network"
+            ],
+            "description": "Which drawn outline the vehicle's pin falls in. `network` is everywhere the outlines do not reach, billed at the network rate — a valid choice, not an unavailable one."
           },
           "status": {
             "type": "string"
@@ -1263,6 +1271,10 @@
           "secondaryCount": {
             "type": "integer"
           },
+          "networkCount": {
+            "type": "integer",
+            "description": "Listed vehicles outside both outlines."
+          },
           "availableCount": {
             "type": "integer",
             "description": "Of the listed vehicles, how many can be ordered."
@@ -1272,6 +1284,7 @@
           "items",
           "primeCount",
           "secondaryCount",
+          "networkCount",
           "availableCount"
         ]
       },
@@ -5331,8 +5344,8 @@
         "tags": [
           "admin-vehicles"
         ],
-        "summary": "Vehicles whose operating pin sits in Prime or Secondary",
-        "description": "Same matching as the advertiser browse, but includes driver name and plate for operations. Requires `vehicle.read`.",
+        "summary": "Selectable vehicles, tiered by the drawn zones",
+        "description": "Same list as the advertiser browse, but includes driver name and plate for operations. Requires `vehicle.read`.",
         "security": [
           {
             "cookieAuth": []
@@ -5349,7 +5362,7 @@
         },
         "responses": {
           "200": {
-            "description": "Vehicles in the drawn zones.",
+            "description": "The fleet, each vehicle tiered.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5386,8 +5399,8 @@
         "tags": [
           "campaigns"
         ],
-        "summary": "Vehicles whose operating pin sits in Prime or Secondary",
-        "description": "Requires `advertiser.vehicle.select`. Matching is the driver’s onboard pin against the draft outlines. Identity is withheld (no name, no plate). Assignment still needs admin confirmation (AC-22.4).",
+        "summary": "Selectable vehicles, tiered by the drawn zones",
+        "description": "Requires `advertiser.vehicle.select`. Returns the city’s fleet; the draft outlines tier each vehicle by its onboard pin rather than filtering the list, so this is answerable before anything is drawn. The driver’s name is withheld; the plate is not. Assignment still needs admin confirmation (AC-22.4).",
         "security": [
           {
             "cookieAuth": []
@@ -5404,7 +5417,7 @@
         },
         "responses": {
           "200": {
-            "description": "Vehicles in the drawn zones.",
+            "description": "The fleet, each vehicle tiered.",
             "content": {
               "application/json": {
                 "schema": {

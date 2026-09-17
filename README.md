@@ -9,7 +9,7 @@ One codebase, three deployables:
 | Service       | Command                 | Port | Owns                                                           |
 | ------------- | ----------------------- | ---- | -------------------------------------------------------------- |
 | **api**       | `npm run dev:api`       | 8080 | Every domain module: auth, drivers, campaigns, earnings, admin |
-| **ingestion** | `npm run dev:ingestion` | 8081 | The GPS write path, and nothing else                           |
+| **ingestion** | `npm run dev:ingestion` | 3001 | The GPS write path, and nothing else                           |
 | **worker**    | `npm run dev:worker`    | —    | The pipeline: classify, allocate, bill, accrue, pay out        |
 
 They are separated so a burst of location uploads cannot slow the screen an

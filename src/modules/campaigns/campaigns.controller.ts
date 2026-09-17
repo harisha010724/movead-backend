@@ -100,8 +100,9 @@ export async function availableVehicles(req: Request, res: Response): Promise<vo
   const body = parseBody(req, AvailableVehiclesRequestSchema);
   advertiserIdOf(req);
   res.json(
-    await drivers.vehiclesInZones({
+    await drivers.selectableVehicles({
       vehicleType: body.vehicleType,
+      ...(body.city ? { city: body.city } : {}),
       zonePolygons: body.zonePolygons,
       revealIdentity: false,
     }),
