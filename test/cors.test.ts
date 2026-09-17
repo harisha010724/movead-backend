@@ -34,7 +34,7 @@ describe('cors', () => {
   it('allows the Expo web preview independently of the deployed portal list', async () => {
     // Metro serves `expo start --web` here. Native Android sends no Origin and
     // is covered by the next case instead.
-    expect(await loginFrom('http://localhost:8081')).not.toBe(403);
+    expect(await loginFrom('http://localhost:3002')).not.toBe(403);
   });
 
   it('allows a caller that sends no Origin at all, which is the mobile app', async () => {
