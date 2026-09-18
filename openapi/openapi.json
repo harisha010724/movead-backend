@@ -10639,7 +10639,7 @@
           "driver-portal"
         ],
         "summary": "Whether this driver may start tracking",
-        "description": "AC-07's six conditions — the driver's own consent to be tracked (AC-04.3) among them — evaluated from live rows. Every unmet condition is returned with a remedy, per UI-036.3: the driver sees all of them, not just the first.",
+        "description": "AC-07's conditions — the driver's own consent to be tracked (AC-04.3) among them — evaluated from live rows. Four checks: consent, vehicle approved, campaign assigned, and advertisement installed, the last covering whether the vehicle is live on a running campaign. Every unmet condition is returned with a remedy, per UI-036.3: the driver sees all of them, not just the first.",
         "security": [
           {
             "cookieAuth": []
@@ -11356,7 +11356,7 @@
           "driver-portal"
         ],
         "summary": "Whether this driver may start tracking",
-        "description": "The five AC-07 conditions, each with a remedy when it fails. The same shape the app draws its checklist from.",
+        "description": "The AC-07 conditions, each with a remedy when it fails. The same shape the app draws its checklist from.",
         "security": [
           {
             "bearerAuth": []

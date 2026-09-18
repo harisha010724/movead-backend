@@ -391,7 +391,7 @@ registry.registerPath({
   tags: ['driver-portal'],
   summary: 'Whether this driver may start tracking',
   description:
-    "AC-07's six conditions — the driver's own consent to be tracked (AC-04.3) among them — evaluated from live rows. Every unmet condition is returned with a remedy, per UI-036.3: the driver sees all of them, not just the first.",
+    "AC-07's conditions — the driver's own consent to be tracked (AC-04.3) among them — evaluated from live rows. Four checks: consent, vehicle approved, campaign assigned, and advertisement installed, the last covering whether the vehicle is live on a running campaign. Every unmet condition is returned with a remedy, per UI-036.3: the driver sees all of them, not just the first.",
   security: [{ cookieAuth: [] }],
   responses: {
     200: { description: 'Checks.', content: json(EligibilitySchema) },

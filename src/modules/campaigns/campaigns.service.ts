@@ -582,8 +582,14 @@ export async function markPrintReadyForAdmin(input: {
 }
 
 /**
- * Wraps are on the vehicles. Campaign-level until AC-06 records each
- * installation with photos; you still cannot skip print or review.
+ * Wraps are on the vehicles, and this is what puts them there.
+ *
+ * It moves the assignments to ACTIVE as well as the campaign, because the two
+ * used to disagree: the board would read "on the road" while every vehicle sat
+ * at ASSIGNED, and the driver app — which gates tracking on the vehicle, not
+ * the campaign — refused to start. Whoever marked it installed had said the
+ * wrap is on; nothing was served by making the driver wait for a second system
+ * to agree. The photos (AC-06) are still collected as evidence afterwards.
  *
  * And there have to be vehicles. Nothing used to check, so a campaign could be
  * walked review → print → installed without a single vehicle assigned to it
@@ -598,7 +604,7 @@ export async function markInstalledForAdmin(input: {
   actorUserId: string;
   ip: string | null;
 }): Promise<AdminCampaignView> {
-  return runStep(STEPS.installed, {
+  const view = await runStep(STEPS.installed, {
     ...input,
     guard: async (campaign) => {
       const assigned = await CampaignVehicle.count({
@@ -611,6 +617,20 @@ export async function markInstalledForAdmin(input: {
       }
     },
   });
+
+  // After the step, not inside it: a campaign that failed to advance must not
+  // leave vehicles activated for a campaign that is not running.
+  await CampaignVehicle.update(
+    { status: 'ACTIVE', activatedAt: new Date() },
+    {
+      where: {
+        campaignId: input.id,
+        status: { [Op.in]: LIVE_ASSIGNMENT.filter((status) => status !== 'ACTIVE') },
+      },
+    },
+  );
+
+  return view;
 }
 
 export async function rejectForAdmin(input: {

@@ -107,7 +107,7 @@ registry.registerPath({
   tags: ['driver-portal'],
   summary: 'Whether this driver may start tracking',
   description:
-    'The five AC-07 conditions, each with a remedy when it fails. The same shape the app draws its checklist from.',
+    'The AC-07 conditions, each with a remedy when it fails. The same shape the app draws its checklist from.',
   security: [{ bearerAuth: [] }, { cookieAuth: [] }],
   responses: {
     200: { description: 'The checklist.', content: json(z.unknown()) },

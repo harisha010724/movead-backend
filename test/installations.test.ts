@@ -708,7 +708,7 @@ describe('the driver’s inbox', () => {
 });
 
 /*
- * AC-07. The six conditions, and the rule that every unmet one is reported
+ * AC-07. The conditions, and the rule that every unmet one is reported
  * rather than only the first (UI-036.3) — a driver who fixes one thing and is
  * then told about the next will stop trusting the screen.
  */
@@ -720,12 +720,7 @@ describe('tracking eligibility (AC-07)', () => {
 
     expect(eligibility.body.eligible).toBe(false);
     const failed = checksOf(eligibility.body).filter((check) => !check.passed);
-    expect(failed.map((check) => check.id)).toEqual([
-      'campaign_assigned',
-      'ad_installed',
-      'installation_verified',
-      'campaign_active',
-    ]);
+    expect(failed.map((check) => check.id)).toEqual(['campaign_assigned', 'ad_installed']);
     for (const check of failed) {
       expect(check.remedy).toBeTruthy();
     }
@@ -739,13 +734,28 @@ describe('tracking eligibility (AC-07)', () => {
 
     expect(eligibility.body.eligible).toBe(false);
     expect(byId(checksOf(eligibility.body), 'campaign_assigned').passed).toBe(true);
-    expect(byId(checksOf(eligibility.body), 'installation_verified').passed).toBe(false);
+    expect(byId(checksOf(eligibility.body), 'ad_installed').passed).toBe(false);
+  });
+
+  /* Four conditions, not six: installed, verified and active were one question. */
+  it('asks the driver four questions', async () => {
+    const driver = await signInDriver((await approvedDriverWithVehicle()).driverId);
+
+    const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
+
+    expect(checks.map((check) => check.id)).toEqual([
+      'tracking_consent',
+      'vehicle_approved',
+      'campaign_assigned',
+      'ad_installed',
+    ]);
   });
 
   /*
-   * The remedies are the only part of this a driver acts on, so they have to
-   * describe the state the driver is actually in. Saying the photos are being
-   * checked when none were sent sends them to wait instead of to the fitter.
+   * The remedy is the only part of this a driver acts on, so it has to name
+   * the state they are actually in. Telling someone to book an appointment
+   * when operations has not reached their vehicle sends them to chase a step
+   * that is not theirs.
    */
   it('names the blocker the driver has, not the one further down the line', async () => {
     const { driverId } = await assignedVehicleWithDriver();
@@ -753,16 +763,35 @@ describe('tracking eligibility (AC-07)', () => {
 
     const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
 
-    expect(byId(checks, 'installation_verified').remedy).toMatch(/not been sent/i);
-    expect(byId(checks, 'installation_verified').remedy).not.toMatch(/still checking/i);
+    expect(byId(checks, 'ad_installed').passed).toBe(false);
+    expect(byId(checks, 'ad_installed').remedy).toMatch(/not fitted your wrap yet/i);
   });
 
-  it('does not tell a driver on a running campaign that it has not started', async () => {
+  /*
+   * The whole point of the collapse: what operations does on the campaign
+   * production board is what the driver sees. No second system to wait for.
+   */
+  it('unlocks as soon as operations marks the campaign installed', async () => {
+    // Assigning a vehicle already moves the campaign to AWAITING_INSTALLATION,
+    // which is the step "installed" follows.
+    const { campaignId, driverId } = await assignedVehicleWithDriver();
+    await admin.post(`/v1/admin/campaigns/${campaignId}/installed`).expect(200);
+
+    const driver = await signInDriver(driverId);
+    const eligibility = await driver.get('/v1/driver/eligibility').expect(200);
+
+    expect(eligibility.body.eligible).toBe(true);
+    expect(checksOf(eligibility.body).every((check) => check.passed)).toBe(true);
+  });
+
+  /*
+   * A running campaign is not a free pass. The second vehicle onto a live
+   * campaign has no wrap on it yet, and the check is about this vehicle.
+   */
+  it('does not carry a new vehicle onto a campaign that is already running', async () => {
     const { assignmentId, campaignId } = await submittedInstallation();
     await (await secondAdmin()).post(`/v1/admin/assignments/${assignmentId}/approve`).expect(200);
 
-    // A second vehicle joins the campaign that is now running. Its driver is
-    // blocked by their own wrap, which is not the campaign not having started.
     const second = await approvedDriverWithVehicle(OTHER_DRIVER, 'KA05MN9013');
     await admin
       .post(`/v1/admin/campaigns/${campaignId}/vehicles`)
@@ -772,11 +801,24 @@ describe('tracking eligibility (AC-07)', () => {
     const driver = await signInDriver(second.driverId, OTHER_DRIVER.email);
     const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
 
-    expect(byId(checks, 'campaign_active').passed).toBe(false);
-    expect(byId(checks, 'campaign_active').remedy).toMatch(/running, but your vehicle/i);
+    expect(byId(checks, 'ad_installed').passed).toBe(false);
+    expect(byId(checks, 'ad_installed').remedy).toMatch(/not fitted your wrap yet/i);
   });
 
-  it('unlocks only after the installation is approved', async () => {
+  /* AC-34.10 and AC-07.3: pausing is what stops the meter, so it must still. */
+  it('stops a driver whose campaign is paused, and says why', async () => {
+    const { campaignId, driverId } = await assignedVehicleWithDriver();
+    await admin.post(`/v1/admin/campaigns/${campaignId}/installed`).expect(200);
+    await admin.post(`/v1/admin/campaigns/${campaignId}/pause`).send({ reason: REASON }).expect(200);
+
+    const driver = await signInDriver(driverId);
+    const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
+
+    expect(byId(checks, 'ad_installed').passed).toBe(false);
+    expect(byId(checks, 'ad_installed').remedy).toMatch(/paused/i);
+  });
+
+  it('unlocks when the installation is approved', async () => {
     const { assignmentId, driverId } = await submittedInstallation();
     await (await secondAdmin()).post(`/v1/admin/assignments/${assignmentId}/approve`).expect(200);
 

@@ -325,10 +325,6 @@ export function portalCampaign(_req: Request, res: Response): void {
   res.json(null);
 }
 
-export async function portalEligibility(req: Request, res: Response): Promise<void> {
-  res.json(await drivers.portalEligibility(requireDriverId(req)));
-}
-
 export async function portalDocuments(req: Request, res: Response): Promise<void> {
   res.json(await drivers.driverDocuments(requireDriverId(req)));
 }

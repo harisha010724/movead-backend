@@ -119,10 +119,9 @@ describe('starting a session (AC-08)', () => {
 
     const refused = await driver.post('/v1/driver/tracking/session').send({}).expect(409);
 
-    // AC-08.3: not merely "no", but which of the five is in the way. A driver
+    // AC-08.3: not merely "no", but which condition is in the way. A driver
     // told only that they cannot start has nothing to act on.
-    expect(refused.body.message).toMatch(/Installation verified/);
-    expect(refused.body.message).toMatch(/Campaign active/);
+    expect(refused.body.message).toMatch(/Advertisement installed/);
   });
 
   it('starts once every condition holds, and reports zero rather than nothing', async () => {
@@ -392,7 +391,7 @@ describe('zone classification and pricing (AC-13, AC-14, AC-15, AC-21)', () => {
 
 describe('no billing before activation (AC-07)', () => {
   /*
-   * AC-07.3 and AC-07.4: the six conditions are checked on every batch, not
+   * AC-07.3 and AC-07.4: the conditions are checked on every batch, not
    * once when the session opened. A campaign paused at noon must stop costing
    * the advertiser at noon, not at whatever time the driver gets round to
    * pressing stop.
@@ -415,7 +414,7 @@ describe('no billing before activation (AC-07)', () => {
 
     const parked = await segments("state = 'NON_BILLABLE'");
     expect(parked.length).toBeGreaterThan(0);
-    expect(parked[0]?.flag_reason).toMatch(/Campaign active/);
+    expect(parked[0]?.flag_reason).toMatch(/Advertisement installed/);
   });
 
   /*
@@ -758,8 +757,8 @@ async function assignedButNotInstalled(): Promise<{
     .send({ vehicleIds: [vehicleId] })
     .expect(201);
 
-  await admin.post(`/v1/admin/campaigns/${campaignId}/installed`).expect(200);
-
+  // Deliberately stops short of marking the campaign installed, which is now
+  // the thing that puts the vehicle on the road.
   return { assignmentId: String(assigned.body[0].id), campaignId, driverId };
 }
 

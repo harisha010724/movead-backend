@@ -320,12 +320,9 @@ describe('consent to location tracking (AC-04.3, AC-04.4)', () => {
     await driver.put('/v1/driver/me/consent').send({ granted: true }).expect(200);
 
     const response = await driver.get('/v1/driver/me/consent').expect(200);
-    expect(response.body.history).toHaveLength(3);
-    expect(response.body.history.map((entry: { granted: boolean }) => entry.granted)).toEqual([
-      true,
-      false,
-      true,
-    ]);
+    const history = response.body.history as { granted: boolean }[];
+    expect(history).toHaveLength(3);
+    expect(history.map((entry) => entry.granted)).toEqual([true, false, true]);
     expect(response.body.current.granted).toBe(true);
   });
 

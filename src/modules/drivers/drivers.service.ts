@@ -2065,22 +2065,6 @@ export function portalEarnings(driverId: string) {
   return tracking.earningsFor(driverId);
 }
 
-export async function portalEligibility(driverId: string) {
-  const { driver, vehicles } = await driverDetail(driverId);
-  const vehicle = vehicles[0];
-  const vehicleApproved = Boolean(vehicle && READY_VEHICLE.includes(vehicle.status));
-
-  const checks = [
-    { id: 'vehicle_approved', label: 'Vehicle approved', passed: vehicleApproved },
-    { id: 'campaign_assigned', label: 'Campaign assigned', passed: false },
-    { id: 'ad_installed', label: 'Advertisement installed', passed: false },
-    { id: 'installation_verified', label: 'Installation verified', passed: false },
-    { id: 'campaign_active', label: 'Campaign active', passed: driver.status === 'APPROVED' },
-  ];
-
-  return { eligible: checks.every((check) => check.passed), checks };
-}
-
 function applyLocation(driver: Driver, location: DriverLocationInput): void {
   const pin = locationColumns(location);
   driver.city = pin.city;
