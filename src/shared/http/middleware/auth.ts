@@ -56,12 +56,35 @@ export function requireAnyAuth(): RequestHandler {
   return async (req: Request, _res: Response, next: NextFunction) => {
     const audiences: SessionAudience[] = ['admin', 'advertiser', 'driver'];
 
-    // A cookie names its audience, so it needs no guessing.
+    /*
+     * Every cookie that is present, not the first one found.
+     *
+     * A cookie names its audience, so there is no guessing about which
+     * session it is — but a browser can hold more than one at a time, which
+     * is the entire reason the names are prefixed. Taking the first and
+     * committing to it let a *dead* session veto a live one: an operator who
+     * had signed into the admin portal earlier kept a stale
+     * `movead_admin_session`, and because `admin` is first in this list, it
+     * was the one tried. It failed, and the advertiser cookie sitting in the
+     * same request was never read.
+     *
+     * The symptom was specific and misleading. Only the three routes using
+     * this guard broke — `/auth/me`, `/auth/logout` and the live map — while
+     * every `requireAuth(audience)` route on the same page kept working, so
+     * the portal looked signed in and said the session had ended.
+     *
+     * Trying the rest costs at most two extra lookups, and only for a caller
+     * presenting a credential that did not work.
+     */
     for (const audience of audiences) {
-      if (cookieFor(req, audience)) {
+      if (!cookieFor(req, audience)) continue;
+
+      try {
         await establishAny(req, audience);
         next();
         return;
+      } catch {
+        continue;
       }
     }
 
@@ -183,12 +206,20 @@ async function resolve(input: {
  */
 export function requirePermission(permission: string): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction) => {
-    const { user } = currentUser(req);
-
-    if (!user.permissions.includes(permission)) {
-      throw new ForbiddenError('You do not have permission to do that.');
-    }
-
+    assertPermission(currentUser(req).user, permission);
     next();
   };
+}
+
+/**
+ * The same check inside a handler, for a route whose required permission
+ * depends on who is asking — the live map wants `advertiser.tracking.read`
+ * from a buyer and `vehicle.read` from an operator, and middleware is fixed
+ * before the session has been read. Shares the wording so the two cannot
+ * drift into telling a caller different things about the same refusal.
+ */
+export function assertPermission(user: AuthenticatedUser, permission: string): void {
+  if (!user.permissions.includes(permission)) {
+    throw new ForbiddenError('You do not have permission to do that.');
+  }
 }

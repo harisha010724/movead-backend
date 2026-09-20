@@ -4,6 +4,8 @@ import { sequelize } from '../../db/sequelize';
 import { money, toLedger, ZERO, type Money } from '../../pricing/money';
 import { ADVERTISER_RATE, DRIVER_RATE } from '../../pricing/rates';
 import { NotFoundError } from '../../shared/errors';
+import { normaliseRegistration } from '../../shared/registration';
+import { IST, istDate } from '../../shared/time';
 
 /**
  * The two landing screens: operations' view of the whole platform, and an
@@ -20,8 +22,6 @@ import { NotFoundError } from '../../shared/errors';
  * the day boundary an operator in Bengaluru means by "today". Postgres does the
  * conversion, so the boundary does not move with the server's own timezone.
  */
-
-const IST = 'Asia/Kolkata';
 
 export interface DateRange {
   from: string;
@@ -59,6 +59,7 @@ const LIVE_VEHICLES = `
     SELECT v.id,
            v.registration_number,
            cv.campaign_id,
+           c.advertiser_id,
            p.lat,
            p.lon,
            p.recorded_at,
@@ -71,6 +72,7 @@ const LIVE_VEHICLES = `
            END AS state
       FROM campaign_vehicles cv
       JOIN vehicles v ON v.id = cv.vehicle_id
+      JOIN campaigns c ON c.id = cv.campaign_id
       LEFT JOIN tracking_sessions s
              ON s.campaign_vehicle_id = cv.id AND s.status = 'ACTIVE'
       LEFT JOIN LATERAL (
@@ -265,7 +267,7 @@ async function dailyRevenue(range: DateRange): Promise<SeriesPoint[]> {
        FROM generate_series(:from::date, :to::date, interval '1 day') AS day
        LEFT JOIN trip_segments s
               ON s.state = 'BILLABLE'
-             AND (s.started_at AT TIME ZONE :zone)::date = day::date
+             AND ${istDate('s.started_at')} = day::date
       GROUP BY day
       ORDER BY day`,
     { replacements: rangeBinds(range), type: QueryTypes.SELECT },
@@ -306,9 +308,26 @@ export interface LivePosition {
   updatedAt: string;
 }
 
+export interface LivePositionsFilter {
+  campaignId: string | null;
+  /**
+   * Set for an advertiser, null for operations. Applied in the query rather
+   * than trusted from `campaignId`: an advertiser who omits the campaign is
+   * asking about their fleet, not about everybody's, and a filter the caller
+   * supplies is a filter the caller can drop.
+   */
+  advertiserId: string | null;
+  /** Whole or partial plate. Matched as a substring — see the contract. */
+  vehicleNumber: string | null;
+}
+
 export async function livePositions(
-  campaignId: string | null,
+  filter: LivePositionsFilter,
 ): Promise<{ items: LivePosition[]; updatedAt: string }> {
+  // Punctuation alone normalises away to nothing, and an empty needle would
+  // widen `LIKE '%%'` back to the whole fleet — the opposite of a search.
+  const needle = filter.vehicleNumber ? normaliseRegistration(filter.vehicleNumber) : '';
+
   const rows = await sequelize.query<{
     registration_number: string;
     lat: string | null;
@@ -320,9 +339,20 @@ export async function livePositions(
      SELECT registration_number, lat, lon, state, recorded_at
        FROM live
       WHERE (:campaignId::uuid IS NULL OR campaign_id = :campaignId::uuid)
+        AND (:advertiserId::uuid IS NULL OR advertiser_id = :advertiserId::uuid)
+        AND (:vehicleNumber::text IS NULL
+             OR registration_number LIKE '%' || :vehicleNumber || '%')
         AND lat IS NOT NULL
       ORDER BY recorded_at DESC NULLS LAST`,
-    { replacements: { silence: GPS_SILENCE_MINUTES, campaignId }, type: QueryTypes.SELECT },
+    {
+      replacements: {
+        silence: GPS_SILENCE_MINUTES,
+        campaignId: filter.campaignId,
+        advertiserId: filter.advertiserId,
+        vehicleNumber: needle.length > 0 ? needle : null,
+      },
+      type: QueryTypes.SELECT,
+    },
   );
 
   return {
@@ -705,7 +735,7 @@ export async function vehicleListing(input: {
  * drove, and AC-08.7 already makes that the billing boundary.
  */
 function inRange(scope: string, alias = ''): string {
-  return `(${alias}started_at AT TIME ZONE :zone)::date BETWEEN :from::date AND :to::date${scope}`;
+  return `${istDate(`${alias}started_at`)} BETWEEN :from::date AND :to::date${scope}`;
 }
 
 function rangeBinds(range: DateRange): Record<string, unknown> {

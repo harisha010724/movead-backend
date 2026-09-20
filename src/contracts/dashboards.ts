@@ -1,4 +1,4 @@
-import { commonErrorResponses, MoneySchema } from './common';
+import { commonErrorResponses, ErrorBodySchema, MoneySchema } from './common';
 import { registry, z } from './registry';
 
 /**
@@ -35,6 +35,22 @@ export const AdvertiserDashboardQuerySchema = RangeQuerySchema.extend({
 
 export const LivePositionsQuerySchema = z.object({
   campaignId: z.uuid().optional().openapi({ description: 'Omit for the whole fleet.' }),
+  /*
+   * A partial plate, because the number someone has is rarely the whole one:
+   * it is read off a wrap in a photograph, or repeated down a phone. Matched
+   * as a substring for the same reason — the last four digits are what people
+   * remember, and a prefix match cannot find a vehicle from them.
+   */
+  vehicleNumber: z
+    .string()
+    .min(2)
+    .max(16)
+    .optional()
+    .openapi({
+      description:
+        'Whole or partial registration number. Spaces and hyphens are ignored, so `KA 01` matches `KA01AB1234`.',
+      example: 'KA01AB',
+    }),
 });
 
 export const VehicleListQuerySchema = z.object({
@@ -178,7 +194,11 @@ const LivePositionsSchema = registry.register(
   z.object({
     items: z.array(
       z.object({
-        vehicleRef: z.string(),
+        vehicleRef: z.string().openapi({
+          description:
+            'The registration number, normalised to uppercase without spaces. This is what `vehicleNumber` searches against.',
+          example: 'KA01AB1234',
+        }),
         lat: z.number(),
         lon: z.number(),
         state: LiveVehicleStateSchema,
@@ -254,11 +274,17 @@ registry.registerPath({
   tags: ['dashboards'],
   summary: 'Last known position of every working vehicle',
   description:
-    'Either portal. Vehicles with no live assignment are excluded; ones that have stopped reporting keep their last fix, because where a vehicle went quiet is the first thing anyone asks.',
+    'Either portal. Vehicles with no live assignment are excluded; ones that have stopped reporting keep their last fix, because where a vehicle went quiet is the first thing anyone asks. An advertiser sees only vehicles carrying their own campaigns and needs `advertiser.tracking.read`; operations sees the fleet. `vehicleNumber` narrows either to one plate.',
   security: secured,
   request: { query: LivePositionsQuerySchema },
   responses: {
     200: { description: 'Positions.', content: json(LivePositionsSchema) },
+    403: {
+      description: 'Missing permission, or an audience with no fleet to watch.',
+      content: json(ErrorBodySchema),
+    },
+    404: { description: 'No such campaign on this account.', content: json(ErrorBodySchema) },
+    400: commonErrorResponses[400],
     401: commonErrorResponses[401],
   },
 });

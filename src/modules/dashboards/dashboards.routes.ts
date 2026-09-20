@@ -53,9 +53,11 @@ export function advertiserDashboardRoutes(): Router {
  * The fleet, mounted at `/v1/vehicles`.
  *
  * Live positions are open to either portal — an operator watching the whole
- * fleet and an advertiser watching one campaign are the same query with a
- * different filter, and the filter comes from the campaign id rather than from
- * who is asking.
+ * fleet and an advertiser watching their own vehicles are the same query with
+ * a different filter. The guard is `requireAnyAuth` because middleware cannot
+ * name two audiences, not because the route is indifferent to who is asking:
+ * the handler derives the scope and the required permission from the session,
+ * and refuses a driver outright.
  */
 export function fleetRoutes(): Router {
   const router = Router();
