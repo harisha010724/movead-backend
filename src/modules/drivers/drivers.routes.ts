@@ -30,6 +30,13 @@ export function adminDriverRoutes(): Router {
 
   router.post('/drivers/:id/vehicles', requirePermission('driver.create'), controller.addVehicle);
 
+  /*
+   * `driver.read`, not a review permission: this is the day the driver already
+   * sees on their phone, shown to whoever is answering their question about
+   * it. Nothing here releases held distance or moves money.
+   */
+  router.get('/drivers/:id/trips', requirePermission('driver.read'), controller.driverTrips);
+
   router.post(
     '/vehicles/in-zones',
     requirePermission('vehicle.read'),
@@ -62,6 +69,15 @@ export function adminDriverRoutes(): Router {
     requirePermission('vehicle.suspend'),
     controller.reinstateVehicle,
   );
+  /*
+   * AC-25. `trip.audit` rather than `vehicle.read`: this is the first route
+   * behind that permission, and it is a separate grant because it exposes
+   * both sides of the money — what the driver earned and what the advertiser
+   * was charged — to whoever is settling a dispute between them.
+   */
+  router.get('/gps-audit/trips', requirePermission('trip.audit'), controller.auditDay);
+  router.get('/gps-audit/trips/:id', requirePermission('trip.audit'), controller.auditTrip);
+
   router.get('/vehicles/:id/history', requirePermission('vehicle.read'), controller.vehicleHistory);
   /*
    * `vehicle.read` rather than `vehicle.approve`, matching the document file

@@ -1,16 +1,23 @@
-import { Op, type Transaction } from 'sequelize';
+import { Op, QueryTypes, type Transaction } from 'sequelize';
 
 import { sequelize } from '../../db/sequelize';
-import { money, toLedger, toPayable, type Money } from '../../pricing/money';
+import { money, sum, toLedger, toPayable, type Money } from '../../pricing/money';
 import { config } from '../../shared/config';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
-import type { LatLng, ZonePolygons } from '../../shared/geo';
+import type { LatLng, Zone, ZonePolygons } from '../../shared/geo';
+import { IST, istDate, istMonth } from '../../shared/time';
 import { Campaign } from '../campaigns/campaigns.model';
-import { Vehicle } from '../drivers/drivers.model';
+import { Driver, Vehicle } from '../drivers/drivers.model';
 import { eligibility } from '../installations/eligibility';
 import { CampaignVehicle, LIVE_ASSIGNMENT } from '../installations/installations.model';
 
-import { GpsPoint, TrackingSession, TripSegment } from './tracking.model';
+import {
+  GpsPoint,
+  TrackingSession,
+  TripSegment,
+  type SegmentState,
+  type SegmentZone,
+} from './tracking.model';
 import { buildSegments, qualityOf, type PipelineFix } from './tracking.pipeline';
 
 /**
@@ -441,8 +448,14 @@ export async function earningsFor(driverId: string): Promise<{
   history: { date: string; verifiedKm: number; earnings: Money }[];
 }> {
   const [today, month, lifetime, history] = await Promise.all([
-    totalsFor("driver_id = :driverId AND started_at >= date_trunc('day', now())", { driverId }),
-    totalsFor("driver_id = :driverId AND started_at >= date_trunc('month', now())", { driverId }),
+    totalsFor(`driver_id = :driverId AND ${istDate('started_at')} = ${istDate('now()')}`, {
+      driverId,
+      zone: IST,
+    }),
+    totalsFor(`driver_id = :driverId AND ${istMonth('started_at')} = ${istMonth('now()')}`, {
+      driverId,
+      zone: IST,
+    }),
     totalsFor('driver_id = :driverId', { driverId }),
     dailyHistory(driverId),
   ]);
@@ -460,11 +473,24 @@ export async function earningsFor(driverId: string): Promise<{
   };
 }
 
+/**
+ * The last 30 days a driver earned on, newest first.
+ *
+ * Bucketed on the segment's own IST date rather than the session's, so a shift
+ * that runs through midnight is filed as the two days it was driven on. That
+ * also makes each row here the exact total {@link dayDetail} returns for the
+ * same date — a driver who taps a row must not find the trips inside it adding
+ * up to something else.
+ *
+ * `to_char` rather than returning a `date`: `pg` parses a bare `date` into a
+ * JS `Date` at the *server's* midnight, which would undo the conversion this
+ * query just did.
+ */
 async function dailyHistory(
   driverId: string,
 ): Promise<{ date: string; verifiedKm: number; earnings: Money }[]> {
   const rows = (await sequelize.query(
-    `SELECT to_char(date_trunc('day', started_at), 'YYYY-MM-DD') AS date,
+    `SELECT to_char(${istDate('started_at')}, 'YYYY-MM-DD') AS date,
             COALESCE(SUM(distance_km), 0)    AS km,
             COALESCE(SUM(driver_earning), 0) AS earnings
        FROM trip_segments
@@ -472,7 +498,7 @@ async function dailyHistory(
       GROUP BY 1
       ORDER BY 1 DESC
       LIMIT 30`,
-    { replacements: { driverId }, type: 'SELECT' },
+    { replacements: { driverId, zone: IST }, type: 'SELECT' },
   )) as { date: string; km: string; earnings: string }[];
 
   return rows.map((row) => ({
@@ -480,6 +506,477 @@ async function dailyHistory(
     verifiedKm: asKm(row.km),
     earnings: toPayable(money(row.earnings)),
   }));
+}
+
+// --- One day of trips ----------------------------------------------------
+
+export type TripStatus = 'verified' | 'pending_review' | 'rejected';
+
+export interface TripZoneTotal {
+  zone: Zone;
+  km: number;
+  earnings: Money;
+}
+
+export interface TripView {
+  /** The tracking session. One press of Start to one press of Stop. */
+  id: string;
+  /** Position within the day, counting from 1 — what the app labels the row. */
+  sequence: number;
+  startedAt: string;
+  endedAt: string;
+  verifiedKm: number;
+  earnings: Money;
+  status: TripStatus;
+  /** Null when nothing on this trip was billable, so there is nothing to split. */
+  zoneBreakdown: TripZoneTotal[] | null;
+}
+
+export interface DayDetailView {
+  date: string;
+  totalVerifiedKm: number;
+  totalEarnings: Money;
+  trips: TripView[];
+}
+
+/** The same day with the advertiser side of it, which only operations may see. */
+export interface AuditDayView extends DayDetailView {
+  totalCharge: Money;
+}
+
+interface TripRow {
+  session_id: string;
+  started_at: Date;
+  ended_at: Date;
+  km: string;
+  earnings: string;
+  billable: string;
+  pending: string;
+}
+
+interface ZoneRow {
+  session_id: string;
+  zone: SegmentZone;
+  km: string;
+  earnings: string;
+}
+
+/**
+ * One civil day of one party's segments.
+ *
+ * The column is chosen from a closed set rather than passed through, because
+ * it is interpolated into SQL: a driver asking about their own day and an
+ * operator asking about a vehicle's are the same question of different
+ * subjects, and nothing else may ever be substituted here.
+ */
+function dayScope(subject: 'driver_id' | 'vehicle_id'): string {
+  return `${subject} = :subject AND ${istDate('started_at')} = :date::date`;
+}
+
+/**
+ * Every trip a driver made on one civil day, and what each one earned.
+ *
+ * A trip is a tracking session, because that is the unit the driver performed:
+ * they pressed Start, drove, and pressed Stop. The segments underneath are a
+ * pricing artefact — there are hundreds of them in an afternoon and none of
+ * them is an event the driver would recognise.
+ *
+ * A session that runs through midnight appears on both days, carrying only the
+ * segments driven on each, and its times are the first and last of those. The
+ * alternative — filing the whole shift under the day it began — would make the
+ * day total disagree with the money, which is bucketed by segment (AC-08.7).
+ *
+ * The three queries are the same scan under three groupings rather than one
+ * result folded in Node: it keeps every rupee a `SUM` in Postgres, so the day
+ * total cannot drift from the trips that justify it.
+ */
+export async function dayDetail(driverId: string, date: string): Promise<DayDetailView> {
+  const day = await dayOf('driver_id', driverId, date);
+
+  // Rebuilt field by field rather than spread: `AuditDayView` carries what the
+  // advertiser is charged, and a driver must never be handed the platform's
+  // margin because a future field was added to the wider type.
+  return {
+    date: day.date,
+    totalVerifiedKm: day.totalVerifiedKm,
+    totalEarnings: day.totalEarnings,
+    trips: day.trips,
+  };
+}
+
+/** The same day for a vehicle, whoever was driving it. */
+export function vehicleDay(vehicleId: string, date: string): Promise<AuditDayView> {
+  return dayOf('vehicle_id', vehicleId, date);
+}
+
+async function dayOf(
+  subject: 'driver_id' | 'vehicle_id',
+  id: string,
+  date: string,
+): Promise<AuditDayView> {
+  const scope = dayScope(subject);
+  const binds = { subject: id, date, zone: IST };
+
+  const [totals, trips, zones] = await Promise.all([
+    totalsFor(scope, binds),
+
+    sequelize.query<TripRow>(
+      `SELECT session_id,
+              min(started_at) AS started_at,
+              max(ended_at)   AS ended_at,
+              COALESCE(SUM(distance_km)    FILTER (WHERE state = 'BILLABLE'), 0) AS km,
+              COALESCE(SUM(driver_earning) FILTER (WHERE state = 'BILLABLE'), 0) AS earnings,
+              count(*) FILTER (WHERE state = 'BILLABLE')       AS billable,
+              count(*) FILTER (WHERE state = 'PENDING_REVIEW') AS pending
+         FROM trip_segments
+        WHERE ${scope}
+        GROUP BY session_id
+        ORDER BY min(started_at)`,
+      { replacements: binds, type: QueryTypes.SELECT },
+    ),
+
+    // Only zones that actually earned: a row reading "Prime 0.0 km ₹0.00" is
+    // not a breakdown, it is a distraction from the ones that paid.
+    sequelize.query<ZoneRow>(
+      `SELECT session_id,
+              zone,
+              SUM(distance_km)    AS km,
+              SUM(driver_earning) AS earnings
+         FROM trip_segments
+        WHERE ${scope} AND state = 'BILLABLE'
+        GROUP BY session_id, zone
+        HAVING SUM(distance_km) > 0
+        ORDER BY SUM(distance_km) DESC`,
+      { replacements: binds, type: QueryTypes.SELECT },
+    ),
+  ]);
+
+  const breakdowns = new Map<string, TripZoneTotal[]>();
+  for (const row of zones) {
+    const forSession = breakdowns.get(row.session_id) ?? [];
+    forSession.push({
+      zone: row.zone.toLowerCase() as Zone,
+      km: asKm(row.km),
+      earnings: toPayable(money(row.earnings)),
+    });
+    breakdowns.set(row.session_id, forSession);
+  }
+
+  return {
+    date,
+    totalVerifiedKm: asKm(totals.billableKm),
+    totalEarnings: toPayable(money(totals.earnings)),
+    totalCharge: toLedger(money(totals.charge)),
+    trips: trips.map((row, index) => ({
+      id: row.session_id,
+      sequence: index + 1,
+      startedAt: row.started_at.toISOString(),
+      endedAt: row.ended_at.toISOString(),
+      verifiedKm: asKm(row.km),
+      earnings: toPayable(money(row.earnings)),
+      status: statusOf(row),
+      zoneBreakdown: breakdowns.get(row.session_id) ?? null,
+    })),
+  };
+}
+
+/**
+ * A trip holding anything in review reads as in review, even where most of it
+ * cleared. The badge answers "is this figure final?", and for a mixed trip the
+ * honest answer is no — the earnings shown are only the part that settled.
+ */
+function statusOf(counts: { billable: string; pending: string }): TripStatus {
+  if (Number(counts.pending) > 0) return 'pending_review';
+  return Number(counts.billable) > 0 ? 'verified' : 'rejected';
+}
+
+// --- One trip, opened up (AC-25, AC-21.8) --------------------------------
+
+export interface TripLeg {
+  zone: Zone;
+  state: SegmentState;
+  /** Why this run earns nothing yet. Null unless it is held. */
+  flagReason: string | null;
+  startedAt: string;
+  endedAt: string;
+  distanceKm: number;
+  advertiserRate: Money;
+  driverRate: Money;
+  advertiserCharge: Money;
+  driverEarning: Money;
+  /** How many priced segments were merged into this run. */
+  segments: number;
+  /** The line to draw, in order. */
+  path: LatLng[];
+}
+
+export interface TripDetailView {
+  id: string;
+  vehicleRegistration: string;
+  campaignName: string;
+  driverName: string;
+  startedAt: string;
+  endedAt: string | null;
+  distanceKm: number;
+  advertiserCharge: Money;
+  driverEarning: Money;
+  legs: TripLeg[];
+}
+
+interface SegmentRow {
+  zone: SegmentZone;
+  state: SegmentState;
+  flag_reason: string | null;
+  started_at: Date;
+  ended_at: Date;
+  distance_km: string;
+  advertiser_rate: Money;
+  driver_rate: Money;
+  advertiser_charge: Money;
+  driver_earning: Money;
+  from_point_id: string;
+  from_lat: string;
+  from_lon: string;
+  to_lat: string;
+  to_lon: string;
+}
+
+/**
+ * One trip with the priced ground underneath it — the screen AC-25 asks for,
+ * and the only way AC-21.8's zone splits become inspectable.
+ *
+ * Returned as *runs* rather than raw segments. A segment is one pair of GPS
+ * fixes, three seconds apart; an afternoon is thousands of them, and a table
+ * of thousands of identical rows answers no question anyone has. Consecutive
+ * segments agreeing on zone, state and reason are the same fact about the
+ * journey, so they are merged and counted.
+ */
+export async function tripDetail(sessionId: string): Promise<TripDetailView> {
+  const session = await TrackingSession.findByPk(sessionId);
+  if (!session) throw new NotFoundError('Trip');
+
+  const [campaign, vehicle, driver, rows] = await Promise.all([
+    Campaign.findByPk(session.campaignId),
+    Vehicle.findByPk(session.vehicleId),
+    Driver.findByPk(session.driverId),
+    segmentsOf(sessionId),
+  ]);
+
+  const totals = await totalsFor('session_id = :sessionId', { sessionId });
+
+  return {
+    id: session.id,
+    vehicleRegistration: vehicle?.registrationNumber ?? '',
+    campaignName: campaign?.name ?? '',
+    driverName: driver?.name ?? '',
+    startedAt: session.startedAt.toISOString(),
+    endedAt: session.endedAt?.toISOString() ?? null,
+    distanceKm: asKm(totals.billableKm),
+    advertiserCharge: toLedger(money(totals.charge)),
+    driverEarning: toPayable(money(totals.earnings)),
+    legs: intoLegs(rows),
+  };
+}
+
+/** Every priced part of one session, in the order it was driven. */
+function segmentsOf(sessionId: string): Promise<SegmentRow[]> {
+  return sequelize.query<SegmentRow>(
+    `SELECT s.zone, s.state, s.flag_reason, s.started_at, s.ended_at, s.distance_km,
+            s.advertiser_rate, s.driver_rate, s.advertiser_charge, s.driver_earning,
+            s.from_point_id,
+            f.lat AS from_lat, f.lon AS from_lon,
+            t.lat AS to_lat,   t.lon AS to_lon
+       FROM trip_segments s
+       JOIN gps_points f ON f.id = s.from_point_id
+       JOIN gps_points t ON t.id = s.to_point_id
+      WHERE s.session_id = :sessionId
+      ORDER BY s.started_at, s.part_index`,
+    { replacements: { sessionId }, type: QueryTypes.SELECT },
+  );
+}
+
+interface PlacedSegment extends SegmentRow {
+  from: LatLng;
+  to: LatLng;
+}
+
+/**
+ * Where each priced part actually ran.
+ *
+ * The clipped coordinates are not in the database: a pair of fixes crossing a
+ * boundary is stored as several parts sharing that one pair, each carrying
+ * only its own distance. The crossing is recovered by walking the straight
+ * line between the two fixes by cumulative distance, which is exact — that
+ * straight line is what the pipeline clipped in the first place (AC-21).
+ *
+ * This has to happen before the parts are grouped into runs. A part's offset
+ * is a fraction of the pair it was cut from, and a pair that crosses a
+ * boundary is split across two runs by definition, so a run on its own no
+ * longer knows what it is a fraction of.
+ */
+function place(rows: SegmentRow[]): PlacedSegment[] {
+  const placed: PlacedSegment[] = [];
+
+  for (const [, parts] of groupConsecutive(rows, (part) => part.from_point_id)) {
+    // Non-null: `groupConsecutive` never emits an empty group.
+    const head = parts[0] as SegmentRow;
+    const from = { lat: Number(head.from_lat), lng: Number(head.from_lon) };
+    const to = { lat: Number(head.to_lat), lng: Number(head.to_lon) };
+    const total = parts.reduce((metres, part) => metres + Number(part.distance_km), 0);
+
+    let travelled = 0;
+    for (const part of parts) {
+      const start = total > 0 ? along(from, to, travelled / total) : from;
+      travelled += Number(part.distance_km);
+      const end = total > 0 ? along(from, to, travelled / total) : to;
+      placed.push({ ...part, from: start, to: end });
+    }
+  }
+
+  return placed;
+}
+
+/** Consecutive segments that say the same thing about the journey. */
+function sameRun(a: SegmentRow, b: SegmentRow): boolean {
+  return a.zone === b.zone && a.state === b.state && a.flag_reason === b.flag_reason;
+}
+
+function intoLegs(rows: SegmentRow[]): TripLeg[] {
+  const legs: TripLeg[] = [];
+  let run: PlacedSegment[] = [];
+
+  const flush = () => {
+    if (run.length > 0) legs.push(toLeg(run));
+    run = [];
+  };
+
+  for (const segment of place(rows)) {
+    const previous = run.at(-1);
+    if (previous && !sameRun(previous, segment)) flush();
+    run.push(segment);
+  }
+  flush();
+
+  return legs;
+}
+
+function toLeg(run: PlacedSegment[]): TripLeg {
+  // Non-null: `intoLegs` never flushes an empty run.
+  const first = run[0] as PlacedSegment;
+  const last = run.at(-1) as PlacedSegment;
+
+  return {
+    zone: first.zone.toLowerCase() as Zone,
+    state: first.state,
+    flagReason: first.flag_reason,
+    startedAt: first.started_at.toISOString(),
+    endedAt: last.ended_at.toISOString(),
+    distanceKm: asKm(toLedger(sum(run.map((part) => part.distance_km)))),
+    advertiserRate: first.advertiser_rate,
+    driverRate: first.driver_rate,
+    advertiserCharge: toLedger(sum(run.map((part) => part.advertiser_charge))),
+    driverEarning: toPayable(sum(run.map((part) => part.driver_earning))),
+    segments: run.length,
+    // Each part ends where the next begins, so the line is the run's start
+    // followed by every end — no point repeated, no gap introduced.
+    path: [first.from, ...run.map((part) => part.to)],
+  };
+}
+
+function along(from: LatLng, to: LatLng, fraction: number): LatLng {
+  return {
+    lat: from.lat + (to.lat - from.lat) * fraction,
+    lng: from.lng + (to.lng - from.lng) * fraction,
+  };
+}
+
+// --- The same trip, for the driver who drove it -------------------------
+
+export interface DriverTripLeg {
+  zone: Zone;
+  state: SegmentState;
+  /** Why this stretch has not been paid. Null unless it is held or refused. */
+  flagReason: string | null;
+  startedAt: string;
+  endedAt: string;
+  distanceKm: number;
+  earnings: Money;
+  path: LatLng[];
+}
+
+export interface DriverTripView {
+  id: string;
+  campaignName: string;
+  startedAt: string;
+  endedAt: string | null;
+  verifiedKm: number;
+  earnings: Money;
+  status: TripStatus;
+  legs: DriverTripLeg[];
+}
+
+/**
+ * Where one of the driver's own trips actually went (AC-21.8, AC-24).
+ *
+ * The same runs the audit screen shows an operator, with the advertiser's side
+ * of every one of them removed. What the platform charges for a kilometre is
+ * not the driver's business and is not merely omitted from the response — the
+ * legs are rebuilt field by field, so a field added to `TripLeg` later cannot
+ * arrive on a phone by inheritance.
+ *
+ * Refused and held stretches are included rather than filtered out. A driver
+ * who can see 26 km on the map and 24 km on the total is owed the two
+ * kilometres in between, and where they were.
+ */
+export async function driverTrip(driverId: string, sessionId: string): Promise<DriverTripView> {
+  const session = await TrackingSession.findByPk(sessionId);
+
+  // One answer for "no such trip" and "not yours". Telling the two apart would
+  // let any driver test whether a session id exists.
+  if (!session || session.driverId !== driverId) throw new NotFoundError('Trip');
+
+  const [campaign, rows, totals] = await Promise.all([
+    Campaign.findByPk(session.campaignId),
+    segmentsOf(sessionId),
+    totalsFor('session_id = :sessionId', { sessionId }),
+  ]);
+
+  const counts = {
+    billable: String(rows.filter((row) => row.state === 'BILLABLE').length),
+    pending: String(rows.filter((row) => row.state === 'PENDING_REVIEW').length),
+  };
+
+  return {
+    id: session.id,
+    campaignName: campaign?.name ?? '',
+    startedAt: session.startedAt.toISOString(),
+    endedAt: session.endedAt?.toISOString() ?? null,
+    verifiedKm: asKm(totals.billableKm),
+    earnings: toPayable(money(totals.earnings)),
+    status: statusOf(counts),
+    legs: intoLegs(rows).map((leg) => ({
+      zone: leg.zone,
+      state: leg.state,
+      flagReason: leg.flagReason,
+      startedAt: leg.startedAt,
+      endedAt: leg.endedAt,
+      distanceKm: leg.distanceKm,
+      earnings: leg.driverEarning,
+      path: leg.path,
+    })),
+  };
+}
+
+function groupConsecutive<T, K>(items: T[], key: (item: T) => K): [K, T[]][] {
+  const groups: [K, T[]][] = [];
+
+  for (const item of items) {
+    const last = groups.at(-1);
+    if (last && last[0] === key(item)) last[1].push(item);
+    else groups.push([key(item), [item]]);
+  }
+
+  return groups;
 }
 
 /** What a campaign has actually had driven for it, and what that costs. */

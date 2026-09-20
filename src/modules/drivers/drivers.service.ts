@@ -6,6 +6,7 @@ import { sequelize } from '../../db/sequelize';
 import { config } from '../../shared/config';
 import { zoneForPoint } from '../../shared/geo';
 import { ConflictError, NotFoundError, UnprocessableError } from '../../shared/errors';
+import { normaliseRegistration } from '../../shared/registration';
 import * as audit from '../audit/audit.service';
 import { type ZonePolygons } from '../campaigns/campaigns.model';
 import { generateLoginPassword, hashPassword } from '../identity/credentials';
@@ -2063,6 +2064,60 @@ async function vehiclePhotoBytes(
  */
 export function portalEarnings(driverId: string) {
   return tracking.earningsFor(driverId);
+}
+
+/**
+ * One civil day of a driver's trips — the day behind a row of their earnings
+ * history.
+ *
+ * The driver is looked up rather than trusted from the path, so that an
+ * operator asking about an id that does not exist is told so. Without it a
+ * typo answers with a plausible empty day, which is the worst possible reply
+ * to "did this driver work on Tuesday?".
+ */
+export async function dayOfTrips(driverId: string, date: string) {
+  await require_(driverId);
+  return tracking.dayDetail(driverId, date);
+}
+
+/**
+ * AC-25 — one civil day of a vehicle's trips, found by the plate on it.
+ *
+ * Keyed on the vehicle rather than the driver because of the question this
+ * screen answers. An advertiser disputing an invoice is disputing distance
+ * their livery was carried, and the livery is on the car: a vehicle handed to
+ * a relief driver mid-campaign was still working, and filing that afternoon
+ * under a second person would split one day of billed kilometres in two.
+ *
+ * The resolved vehicle comes back with the day so the screen can show whose
+ * plate it actually matched.
+ */
+export async function auditDay(registrationNumber: string, date: string) {
+  const vehicle = await repo.findVehicleByRegistration(
+    normaliseRegistration(registrationNumber),
+  );
+  if (!vehicle) throw new NotFoundError('Vehicle');
+
+  return {
+    vehicle: { id: vehicle.id, registrationNumber: vehicle.registrationNumber },
+    ...(await tracking.vehicleDay(vehicle.id, date)),
+  };
+}
+
+/** One of those trips, opened up to the priced ground underneath it. */
+export function auditTrip(sessionId: string) {
+  return tracking.tripDetail(sessionId);
+}
+
+/**
+ * AC-24 — one of the driver's own trips, as a route they can look at.
+ *
+ * Scoped inside the service rather than by the route, because the safety here
+ * is that the trip belongs to the caller and that check has to sit next to the
+ * read it guards.
+ */
+export function ownTrip(driverId: string, sessionId: string) {
+  return tracking.driverTrip(driverId, sessionId);
 }
 
 function applyLocation(driver: Driver, location: DriverLocationInput): void {

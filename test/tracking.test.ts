@@ -33,6 +33,16 @@ const DRIVER = {
   location: { city: 'Bengaluru', label: 'MG Road, Bengaluru', lat: 12.9756, lng: 77.6069 },
 };
 
+/** A second driver on the same platform, for the cases about not seeing them. */
+const OTHER_DRIVER = {
+  mobile: '9845099887',
+  name: 'Priya Nair',
+  email: 'priya.nair@example.com',
+  location: { city: 'Bengaluru', label: 'Indiranagar, Bengaluru', lat: 12.9784, lng: 77.6408 },
+};
+
+type DriverProfile = typeof DRIVER;
+
 /**
  * Two boxes with a gap between them, so a straight run north crosses Prime,
  * then unzoned ground, then Secondary — every classification in one journey.
@@ -78,6 +88,7 @@ let reachable = false;
 let admin: Agent;
 let inbox: MailInbox;
 let advertiserAgent: Agent | null = null;
+let reviewerAgent: Agent | null = null;
 
 beforeAll(async () => {
   reachable = await pingDatabase().then(
@@ -101,6 +112,7 @@ beforeEach(async (ctx: TestContext) => {
 
   inbox = captureMail();
   advertiserAgent = null;
+  reviewerAgent = null;
   await sequelize.query(
     `TRUNCATE users, user_sessions, user_invitations, audit_log, advertisers, campaigns,
      notifications, drivers, driver_consents, vehicles, campaign_vehicles, installations,
@@ -591,7 +603,657 @@ describe('stopping (AC-08)', () => {
   });
 });
 
+// --------------------------------------------------------- reading it back
+
+/**
+ * A day of trips (AC-23).
+ *
+ * This is the screen a driver opens when they disagree with a figure, so the
+ * cases that matter are the ones about it agreeing with itself: the day total
+ * matching the history row above it, the trips matching the total, and a shift
+ * landing on the day it was driven rather than the day UTC filed it under.
+ */
+describe('a day of trips', () => {
+  it('groups the day into one trip per session, earliest first', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+    await driver.delete('/v1/driver/tracking/session').send({}).expect(200);
+
+    const second = await driver.post('/v1/driver/tracking/session').send({}).expect(200);
+    await upload(driver, String(second.body.id), straightRun());
+
+    const day = await dayOf(driver, await istToday());
+    const [first, next] = day.trips;
+
+    expect(day.trips).toHaveLength(2);
+    expect(day.trips.map((trip) => trip.sequence)).toEqual([1, 2]);
+    expect(first?.id).toBe(sessionId);
+    expect(new Date(String(first?.startedAt)).getTime()).toBeLessThan(
+      new Date(String(next?.startedAt)).getTime(),
+    );
+  });
+
+  /*
+   * The whole point of the screen. A driver taps ₹82.40 and must not find
+   * trips adding up to ₹79 — so the total is asserted against the history row
+   * it was opened from, not against a figure recomputed here.
+   */
+  it('totals exactly what the earnings history claims for that day', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const today = await istToday();
+    const earnings = await earningsOf(driver);
+    const row = earnings.history.find((entry) => entry.date === today);
+
+    const day = await dayOf(driver, today);
+
+    expect(row).toBeTruthy();
+    expect(day.totalEarnings).toBe(row?.earnings);
+    expect(day.totalVerifiedKm).toBe(row?.verifiedKm);
+    expect(day.totalEarnings).toBe(earnings.todayEarnings);
+  });
+
+  it('splits a trip by the zones it was actually driven through', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const day = await dayOf(driver, await istToday());
+    const trip = day.trips[0];
+    const parts = trip?.zoneBreakdown ?? [];
+
+    expect(parts.map((part) => part.zone).sort()).toEqual(['network', 'prime', 'secondary']);
+
+    const km = parts.reduce((sum, part) => sum + part.km, 0);
+    expect(km).toBeCloseTo(Number(trip?.verifiedKm), 1);
+  });
+
+  /*
+   * AC-11.4 and AC-18.2. The badge answers "is this final?", so a trip holding
+   * anything reads as in review even though most of it cleared — and the money
+   * beside it is only the part that did.
+   */
+  it('reads a mixed trip as in review, and shows only what cleared', async () => {
+    const { driver, sessionId } = await runningSession();
+
+    // A clean start and a ragged finish: the first pairs earn, the last are
+    // held. A trace that goes bad throughout would hold everything and prove
+    // nothing about the mixed case.
+    await upload(driver, sessionId, [
+      fix({ lat: 12.9715, seconds: 0 }),
+      fix({ lat: 12.973, seconds: 30 }),
+      fix({ lat: 12.9745, seconds: 60 }),
+      fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
+      fix({ lat: 12.9775, seconds: 120, accuracyM: 65 }),
+    ]);
+
+    const day = await dayOf(driver, await istToday());
+    const trip = day.trips[0];
+
+    expect(trip?.status).toBe('pending_review');
+    expect(trip?.verifiedKm).toBeGreaterThan(0);
+
+    // Held distance was driven but is not on the trip, and carries no money.
+    const driven = (await segments('true')).reduce(
+      (sum, segment) => sum + Number(segment.distance_km),
+      0,
+    );
+    expect(trip?.verifiedKm).toBeLessThan(driven);
+  });
+
+  /*
+   * The regression this feature was built on top of.
+   *
+   * 19:00 UTC is 00:30 the next morning in Bengaluru. Bucketing on the raw
+   * timestamp files that shift under the previous date, so a driver finishing
+   * at half past midnight opened today and was shown nothing. The segments are
+   * moved directly rather than backdated through the pipeline, because the
+   * assertion is about the SQL that buckets them and nothing else.
+   */
+  it('files a small-hours trip on the Indian day it was driven, not the UTC one', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    await sequelize.query(
+      `UPDATE trip_segments
+          SET started_at = TIMESTAMPTZ '2026-03-10 19:00:00+00',
+              ended_at   = TIMESTAMPTZ '2026-03-10 19:05:00+00'`,
+    );
+
+    const driven = await dayOf(driver, '2026-03-11');
+    expect(driven.trips).toHaveLength(1);
+    expect(driven.totalVerifiedKm).toBeGreaterThan(0);
+
+    const utcDate = await dayOf(driver, '2026-03-10');
+    expect(utcDate.trips).toEqual([]);
+
+    // And the row the driver would have tapped to get there agrees.
+    const earnings = await earningsOf(driver);
+    expect(earnings.history.map((row) => row.date)).toContain('2026-03-11');
+  });
+
+  it('answers a day the driver did not work with an empty day, not an error', async () => {
+    const driver = await drivingDriver();
+
+    expect(await dayOf(driver, '2026-01-02')).toEqual({
+      date: '2026-01-02',
+      totalVerifiedKm: 0,
+      totalEarnings: '0.00',
+      trips: [],
+    });
+  });
+
+  it('rejects a date that is not one', async () => {
+    const driver = await drivingDriver();
+    await driver.get('/v1/driver/earnings/days/yesterday').expect(400);
+  });
+
+  it('does not show one driver another driver’s trips', async () => {
+    const first = await runningSession();
+    await upload(first.driver, first.sessionId, crossCity());
+
+    const second = await runningSession(OTHER_DRIVER);
+    await upload(second.driver, second.sessionId, straightRun());
+
+    const mine = await dayOf(second.driver, await istToday());
+
+    expect(mine.trips).toHaveLength(1);
+    expect(mine.trips[0]?.id).toBe(second.sessionId);
+  });
+
+  it('refuses a caller with no session at all', async () => {
+    await client().get('/v1/driver/earnings/days/2026-01-02').expect(401);
+  });
+});
+
+describe('a day of trips, read by operations', () => {
+  it('shows an operator the same day the driver sees', async () => {
+    const { driver, sessionId, driverId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const today = await istToday();
+    const theirs = await dayOf(driver, today);
+    const ours = await admin
+      .get(`/v1/admin/drivers/${driverId}/trips`)
+      .query({ date: today })
+      .expect(200);
+
+    expect(ours.body).toEqual(theirs);
+  });
+
+  /*
+   * A typo must not answer with a plausible empty day. "Did this driver work
+   * on Tuesday?" answered with silence is the one reply worse than an error.
+   */
+  it('says so when the id is not a driver', async () => {
+    await admin
+      .get(`/v1/admin/drivers/${randomUUID()}/trips`)
+      .query({ date: '2026-01-02' })
+      .expect(404);
+  });
+
+  it('is not open to the driver themselves', async () => {
+    const { driver, driverId } = await runningSession();
+    await driver.get(`/v1/admin/drivers/${driverId}/trips`).query({ date: '2026-01-02' }).expect(401);
+  });
+});
+
+// ------------------------------------------------------------- the GPS audit
+
+/**
+ * AC-25. The screen a disputed invoice is settled on, entered the way the
+ * dispute arrives: someone has a plate and a date, and wants to know what was
+ * billed and why.
+ */
+describe('auditing a vehicle by its plate', () => {
+  it('finds the day by the registration, however it was typed', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+    const today = await istToday();
+
+    const day = await auditDay('ka 05-mn 9012', today);
+
+    expect(day.vehicle.registrationNumber).toBe(PLATE);
+    expect(day.trips).toHaveLength(1);
+    expect(day.trips[0]?.id).toBe(sessionId);
+  });
+
+  /*
+   * Exact, not a substring. `KA05MN9013` is a real second vehicle here, and an
+   * audit that answers a four-digit fragment with someone else's kilometres is
+   * worse than one that answers nothing.
+   */
+  it('will not settle for a partial plate', async () => {
+    await runningSession();
+    const today = await istToday();
+
+    await auditRequest('KA05MN', today).expect(404);
+    await auditRequest('KA05MN901', today).expect(404);
+    await auditRequest('9012', today).expect(404);
+  });
+
+  it('says so when no vehicle carries that plate', async () => {
+    await auditRequest('KA99XX0000', '2026-01-02').expect(404);
+  });
+
+  /*
+   * The number the driver's own screen must never carry. Both sides of the
+   * kilometre in one response is the entire reason this endpoint is separate
+   * from the one the phone calls.
+   */
+  it('shows what the advertiser paid beside what the driver earned', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const day = await auditDay(PLATE, await istToday());
+
+    expect(Number(day.totalCharge)).toBeGreaterThan(Number(day.totalEarnings));
+    expect(Number(day.totalEarnings)).toBeGreaterThan(0);
+
+    // And the driver's view of the same day still does not mention it.
+    const theirs = await dayOf(driver, await istToday());
+    expect(theirs).not.toHaveProperty('totalCharge');
+  });
+
+  it('keeps one vehicle’s day clear of another’s trips', async () => {
+    const first = await runningSession();
+    await upload(first.driver, first.sessionId, crossCity());
+
+    const second = await runningSession(OTHER_DRIVER);
+    await upload(second.driver, second.sessionId, straightRun());
+
+    const day = await auditDay(PLATES[OTHER_DRIVER.email] ?? '', await istToday());
+
+    expect(day.trips).toHaveLength(1);
+    expect(day.trips[0]?.id).toBe(second.sessionId);
+  });
+
+  it('answers a day the vehicle did not work with an empty day', async () => {
+    await runningSession();
+    const day = await auditDay(PLATE, '2026-01-02');
+
+    expect(day.trips).toEqual([]);
+    expect(day.totalVerifiedKm).toBe(0);
+    // Ledger scale, as every advertiser-side figure on the platform is.
+    expect(day.totalCharge).toBe('0.0000');
+  });
+
+  it('is not open to a driver, or to an advertiser', async () => {
+    const { driver } = await runningSession();
+    await driver.get('/v1/admin/gps-audit/trips').query({ vehicleNumber: PLATE, date: '2026-01-02' }).expect(401);
+
+    const advertiser = await advertiserPortal();
+    await advertiser
+      .get('/v1/admin/gps-audit/trips')
+      .query({ vehicleNumber: PLATE, date: '2026-01-02' })
+      .expect(401);
+  });
+
+  /*
+   * `trip.audit` has been in the catalogue since the first migration with
+   * nothing behind it. This is the test that it is now load-bearing rather
+   * than decorative — revoked, the route has to close.
+   */
+  it('is closed to an operator without the audit permission', async () => {
+    await withoutPermission('trip.audit', async () => {
+      await auditRequest(PLATE, '2026-01-02').expect(403);
+    });
+
+    // Restored, so the failure above was the grant and not something else.
+    await auditRequest(PLATE, '2026-01-02').expect(404);
+  });
+});
+
+describe('opening up one trip', () => {
+  /*
+   * The payoff of AC-21.8, and the reason this endpoint returns geometry at
+   * all. `crossCity` is a single pair of fixes running north through Prime,
+   * unzoned ground and Secondary — one journey the pricing pipeline cut into
+   * three. Drawn as one line it would be a lie about where the money came
+   * from; drawn as three it is the answer to the dispute.
+   */
+  it('splits the line at every zone it crossed', async () => {
+    const trip = await drivenAcrossTheCity();
+
+    expect(trip.legs.map((leg) => leg.zone)).toEqual(['prime', 'network', 'secondary']);
+    expect(trip.legs.map((leg) => leg.state)).toEqual(Array(3).fill('BILLABLE'));
+  });
+
+  /*
+   * The clipped coordinates are not stored — a split pair keeps one pair of
+   * fixes and a distance per part — so the crossings are reconstructed by
+   * walking that straight line. The run is due north at a fixed longitude
+   * through boxes that end at 12.98 and 12.99, so the reconstruction is
+   * checkable against the boundaries themselves rather than against itself.
+   */
+  it('puts the boundary crossings where the boundaries actually are', async () => {
+    const [prime, network, secondary] = (await drivenAcrossTheCity()).legs;
+
+    expect(prime?.path.at(0)?.lat).toBeCloseTo(12.975, 4);
+    expect(prime?.path.at(-1)?.lat).toBeCloseTo(12.98, 4);
+
+    expect(network?.path.at(0)?.lat).toBeCloseTo(12.98, 4);
+    expect(network?.path.at(-1)?.lat).toBeCloseTo(12.99, 4);
+
+    expect(secondary?.path.at(0)?.lat).toBeCloseTo(12.99, 4);
+    expect(secondary?.path.at(-1)?.lat).toBeCloseTo(13.0, 4);
+  });
+
+  it('carries the rate and the money that each stretch produced', async () => {
+    const trip = await drivenAcrossTheCity();
+    const [prime, network] = trip.legs;
+
+    // AC-14: Prime is worth more than unzoned ground, which is the whole
+    // reason the split matters to anybody.
+    expect(Number(prime?.advertiserRate)).toBeGreaterThan(Number(network?.advertiserRate));
+    expect(Number(prime?.driverRate)).toBeLessThan(Number(prime?.advertiserRate));
+
+    const charged = trip.legs.reduce((total, leg) => total + Number(leg.advertiserCharge), 0);
+    expect(charged).toBeCloseTo(Number(trip.advertiserCharge), 2);
+
+    const driven = trip.legs.reduce((total, leg) => total + leg.distanceKm, 0);
+    expect(driven).toBeCloseTo(trip.distanceKm, 1);
+  });
+
+  /*
+   * A run is a claim about the journey, not a row per GPS pair. Four fixes up
+   * one box is three pairs saying the same thing, and an auditor asked to read
+   * three identical rows has been given work instead of an answer.
+   */
+  it('merges consecutive segments that say the same thing', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const trip = await auditTrip(sessionId);
+    const [only] = trip.legs;
+
+    expect(trip.legs).toHaveLength(1);
+    expect(only?.zone).toBe('prime');
+    expect(only?.segments).toBe(3);
+    expect(only?.path).toHaveLength(4);
+  });
+
+  /*
+   * Held distance is the thing under dispute, so it must stay separate from
+   * the cleared distance beside it rather than being merged into one run.
+   */
+  it('keeps held distance apart from what cleared, with the reason', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, [
+      fix({ lat: 12.9715, seconds: 0 }),
+      fix({ lat: 12.973, seconds: 30 }),
+      fix({ lat: 12.9745, seconds: 60, accuracyM: 65 }),
+      fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
+    ]);
+
+    const trip = await auditTrip(sessionId);
+    const held = trip.legs.filter((leg) => leg.state === 'PENDING_REVIEW');
+
+    expect(trip.legs.length).toBeGreaterThan(1);
+    expect(held.length).toBeGreaterThan(0);
+    expect(held[0]?.flagReason).toBeTruthy();
+    expect(held.every((leg) => Number(leg.driverEarning) === 0)).toBe(true);
+  });
+
+  it('names the vehicle, the campaign and the driver it belongs to', async () => {
+    const trip = await drivenAcrossTheCity();
+
+    expect(trip.vehicleRegistration).toBe(PLATE);
+    expect(trip.campaignName).toBe(CAMPAIGN.name);
+    expect(trip.driverName).toBe(DRIVER.name);
+  });
+
+  it('says so when the trip does not exist', async () => {
+    await admin.get(`/v1/admin/gps-audit/trips/${randomUUID()}`).expect(404);
+  });
+
+  it('is closed to an operator without the audit permission', async () => {
+    const { sessionId } = await runningSession();
+    await withoutPermission('trip.audit', async () => {
+      await admin.get(`/v1/admin/gps-audit/trips/${sessionId}`).expect(403);
+    });
+  });
+});
+
+describe('the driver looking at their own trip (AC-24)', () => {
+  it('draws the same line the audit screen does, split by zone', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const [mine, audited] = await Promise.all([
+      ownTrip(driver, sessionId),
+      auditTrip(sessionId),
+    ]);
+
+    expect(mine.legs.map((leg) => leg.zone)).toEqual(['prime', 'network', 'secondary']);
+    expect(mine.legs.map((leg) => leg.path)).toEqual(audited.legs.map((leg) => leg.path));
+  });
+
+  /*
+   * The whole point of the separate endpoint. An operator settling a dispute
+   * sees both sides of the money; the driver sees their own. A field added to
+   * the audit leg later must not reach a phone, so this asserts on the shape
+   * rather than on three named absences.
+   */
+  it('tells the driver nothing about what the advertiser was charged', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const trip = await ownTrip(driver, sessionId);
+    const leaked = Object.keys(trip.legs[0] ?? {}).filter((key) =>
+      key.toLowerCase().includes('advertiser'),
+    );
+
+    expect(leaked).toEqual([]);
+    expect(Object.keys(trip)).not.toContain('advertiserCharge');
+  });
+
+  it('totals to the same trip the day list showed', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const day = await dayOf(driver, await istToday());
+    const listed = day.trips.find((trip) => trip.id === sessionId);
+    const opened = await ownTrip(driver, sessionId);
+
+    expect(opened.verifiedKm).toBe(listed?.verifiedKm);
+    expect(opened.earnings).toBe(listed?.earnings);
+    expect(opened.status).toBe(listed?.status);
+  });
+
+  /*
+   * A driver whose map shows further than their paid distance is owed the
+   * difference and the reason for it, so held ground is returned and marked
+   * rather than dropped from the line.
+   */
+  it('shows held ground on the map, earning nothing, with the reason', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, [
+      fix({ lat: 12.9715, seconds: 0 }),
+      fix({ lat: 12.973, seconds: 30 }),
+      fix({ lat: 12.9745, seconds: 60, accuracyM: 65 }),
+      fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
+    ]);
+
+    const trip = await ownTrip(driver, sessionId);
+    const held = trip.legs.filter((leg) => leg.state === 'PENDING_REVIEW');
+
+    expect(held.length).toBeGreaterThan(0);
+    expect(held[0]?.flagReason).toBeTruthy();
+    expect(held.every((leg) => Number(leg.earnings) === 0)).toBe(true);
+
+    const drawn = trip.legs.reduce((total, leg) => total + leg.distanceKm, 0);
+    expect(drawn).toBeGreaterThan(trip.verifiedKm);
+  });
+
+  /*
+   * The one that matters. Two drivers, and the second asks for the first's
+   * session id — which they could only have guessed, but guessing must not be
+   * rewarded either.
+   */
+  it("will not open another driver's trip", async () => {
+    const mine = await runningSession();
+    await upload(mine.driver, mine.sessionId, straightRun());
+    const stranger = await runningSession(OTHER_DRIVER);
+
+    await stranger.driver.get(`/v1/driver/trips/${mine.sessionId}`).expect(404);
+  });
+
+  it('answers a trip that does not exist the same way', async () => {
+    const driver = await drivingDriver();
+    await driver.get(`/v1/driver/trips/${randomUUID()}`).expect(404);
+  });
+
+  it('refuses an id that is not one', async () => {
+    const driver = await drivingDriver();
+    await driver.get('/v1/driver/trips/not-a-uuid').expect(400);
+  });
+
+  it('is closed to a caller who is not signed in', async () => {
+    const { sessionId } = await runningSession();
+    await client().get(`/v1/driver/trips/${sessionId}`).expect(401);
+  });
+});
+
 // ------------------------------------------------------------------ fixtures
+
+/**
+ * Today in Asia/Kolkata, asked of Postgres.
+ *
+ * Computing it in Node would make the test agree with the code for the wrong
+ * reason on a machine that happens to run in IST, and disagree on CI, which
+ * does not.
+ */
+async function istToday(): Promise<string> {
+  const today = await row<{ date: string }>(
+    `SELECT to_char((now() AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS date`,
+  );
+  return today.date;
+}
+
+interface DayBody {
+  date: string;
+  totalVerifiedKm: number;
+  totalEarnings: string;
+  trips: {
+    id: string;
+    sequence: number;
+    startedAt: string;
+    endedAt: string;
+    verifiedKm: number;
+    earnings: string;
+    status: string;
+    zoneBreakdown: { zone: string; km: number; earnings: string }[] | null;
+  }[];
+}
+
+interface EarningsBody {
+  todayVerifiedKm: number;
+  todayEarnings: string;
+  history: { date: string; verifiedKm: number; earnings: string }[];
+}
+
+async function dayOf(driver: Agent, date: string): Promise<DayBody> {
+  const response = await driver.get(`/v1/driver/earnings/days/${date}`).expect(200);
+  return response.body as DayBody;
+}
+
+async function earningsOf(driver: Agent): Promise<EarningsBody> {
+  const response = await driver.get('/v1/driver/earnings').expect(200);
+  return response.body as EarningsBody;
+}
+
+interface AuditDayBody extends DayBody {
+  vehicle: { id: string; registrationNumber: string };
+  totalCharge: string;
+}
+
+interface TripDetailBody {
+  id: string;
+  vehicleRegistration: string;
+  campaignName: string;
+  driverName: string;
+  distanceKm: number;
+  advertiserCharge: string;
+  driverEarning: string;
+  legs: {
+    zone: string;
+    state: string;
+    flagReason: string | null;
+    distanceKm: number;
+    advertiserRate: string;
+    driverRate: string;
+    advertiserCharge: string;
+    driverEarning: string;
+    segments: number;
+    path: { lat: number; lng: number }[];
+  }[];
+}
+
+function auditRequest(vehicleNumber: string, date: string) {
+  return admin.get('/v1/admin/gps-audit/trips').query({ vehicleNumber, date });
+}
+
+async function auditDay(vehicleNumber: string, date: string): Promise<AuditDayBody> {
+  const response = await auditRequest(vehicleNumber, date).expect(200);
+  return response.body as AuditDayBody;
+}
+
+async function auditTrip(sessionId: string): Promise<TripDetailBody> {
+  const response = await admin.get(`/v1/admin/gps-audit/trips/${sessionId}`).expect(200);
+  return response.body as TripDetailBody;
+}
+
+interface DriverTripBody {
+  id: string;
+  campaignName: string;
+  verifiedKm: number;
+  earnings: string;
+  status: string;
+  legs: {
+    zone: string;
+    state: string;
+    flagReason: string | null;
+    distanceKm: number;
+    earnings: string;
+    path: { lat: number; lng: number }[];
+  }[];
+}
+
+async function ownTrip(driver: Agent, sessionId: string): Promise<DriverTripBody> {
+  const response = await driver.get(`/v1/driver/trips/${sessionId}`).expect(200);
+  return response.body as DriverTripBody;
+}
+
+/** One session north through Prime, unzoned ground and Secondary. */
+async function drivenAcrossTheCity(): Promise<TripDetailBody> {
+  const { driver, sessionId } = await runningSession();
+  await upload(driver, sessionId, crossCity());
+  return auditTrip(sessionId);
+}
+
+/**
+ * Runs the body with a permission taken off SUPER_ADMIN, then puts it back.
+ *
+ * Roles are seeded by migration and survive the truncation between tests, so
+ * the grant has to be restored by hand however the assertion goes — otherwise
+ * one failing expectation silently disarms every later test in the file.
+ */
+async function withoutPermission(key: string, body: () => Promise<void>): Promise<void> {
+  const revoke = `DELETE FROM role_permissions
+                   WHERE permission_key = :key
+                     AND role_id = (SELECT id FROM roles WHERE key = 'SUPER_ADMIN')`;
+  const grant = `INSERT INTO role_permissions (role_id, permission_key)
+                 SELECT id, :key FROM roles WHERE key = 'SUPER_ADMIN'
+                 ON CONFLICT DO NOTHING`;
+
+  await sequelize.query(revoke, { replacements: { key } });
+  try {
+    await body();
+  } finally {
+    await sequelize.query(grant, { replacements: { key } });
+  }
+}
 
 /** A fix on the northbound line through both boxes, at 77.61. */
 function fix(input: {
@@ -681,14 +1343,14 @@ async function drivingDriver(): Promise<Agent> {
   return signInDriver(driverId);
 }
 
-async function runningSession(): Promise<{
+async function runningSession(who: DriverProfile = DRIVER): Promise<{
   driver: Agent;
   sessionId: string;
   campaignId: string;
   driverId: string;
 }> {
-  const { driverId, campaignId } = await liveCampaign();
-  const driver = await signInDriver(driverId);
+  const { driverId, campaignId } = await liveCampaign(who);
+  const driver = await signInDriver(driverId, who);
   const started = await driver.post('/v1/driver/tracking/session').send({}).expect(200);
   return { driver, sessionId: String(started.body.id), campaignId, driverId };
 }
@@ -718,8 +1380,10 @@ async function signInAdvertiser(): Promise<Agent> {
   return portal;
 }
 
-async function liveCampaign(): Promise<{ campaignId: string; driverId: string }> {
-  const context = await assignedButNotInstalled();
+async function liveCampaign(
+  who: DriverProfile = DRIVER,
+): Promise<{ campaignId: string; driverId: string }> {
+  const context = await assignedButNotInstalled(who);
 
   for (const angle of ['FRONT', 'REAR', 'LEFT', 'RIGHT']) {
     await admin
@@ -735,12 +1399,12 @@ async function liveCampaign(): Promise<{ campaignId: string; driverId: string }>
   return context;
 }
 
-async function assignedButNotInstalled(): Promise<{
+async function assignedButNotInstalled(who: DriverProfile = DRIVER): Promise<{
   assignmentId: string;
   campaignId: string;
   driverId: string;
 }> {
-  const { driverId, vehicleId } = await approvedDriverWithVehicle();
+  const { driverId, vehicleId } = await approvedDriverWithVehicle(who);
   const advertiser = await advertiserPortal();
 
   const created = await advertiser
@@ -762,7 +1426,13 @@ async function assignedButNotInstalled(): Promise<{
   return { assignmentId: String(assigned.body[0].id), campaignId, driverId };
 }
 
+/** Cached: a test that brings up two campaigns must not enrol this twice. */
 async function secondAdmin(): Promise<Agent> {
+  reviewerAgent ??= await enrolReviewer();
+  return reviewerAgent;
+}
+
+async function enrolReviewer(): Promise<Agent> {
   const email = 'reviewer@movead.in';
   const password = 'reviewer-password-long-enough';
 
@@ -776,13 +1446,23 @@ async function secondAdmin(): Promise<Agent> {
   return agent;
 }
 
-async function approvedDriverWithVehicle(): Promise<{ driverId: string; vehicleId: string }> {
-  const driver = await admin.post('/v1/admin/drivers').send(DRIVER).expect(201);
+const PLATES: Record<string, string> = {
+  [DRIVER.email]: 'KA05MN9012',
+  [OTHER_DRIVER.email]: 'KA05MN9013',
+};
+
+/** The plate the audit tests type in. */
+const PLATE = PLATES[DRIVER.email] ?? '';
+
+async function approvedDriverWithVehicle(
+  who: DriverProfile = DRIVER,
+): Promise<{ driverId: string; vehicleId: string }> {
+  const driver = await admin.post('/v1/admin/drivers').send(who).expect(201);
   const driverId = String(driver.body.driver.id);
 
   const vehicle = await admin
     .post(`/v1/admin/drivers/${driverId}/vehicles`)
-    .send({ registrationNumber: 'KA05MN9012', category: 'CAB' })
+    .send({ registrationNumber: PLATES[who.email], category: 'CAB' })
     .expect(201);
   const vehicleId = String(vehicle.body.id);
 
@@ -824,11 +1504,11 @@ async function uploadDocument(input: {
  * all hold; leaving it off would fail them all for a reason none of them is
  * testing. `driver-profile.test.ts` proves the gate itself bites.
  */
-async function signInDriver(_driverId: string): Promise<Agent> {
+async function signInDriver(_driverId: string, who: DriverProfile = DRIVER): Promise<Agent> {
   const agent = client();
   await agent
     .post('/v1/auth/login')
-    .send({ email: DRIVER.email, password: inbox.passwordFor(DRIVER.email) })
+    .send({ email: who.email, password: inbox.passwordFor(who.email) })
     .expect(200);
   await agent.put('/v1/driver/me/consent').send({ granted: true }).expect(200);
   return agent;

@@ -1758,7 +1758,9 @@
               "type": "object",
               "properties": {
                 "vehicleRef": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "The registration number, normalised to uppercase without spaces. This is what `vehicleNumber` searches against.",
+                  "example": "KA01AB1234"
                 },
                 "lat": {
                   "type": "number"
@@ -4853,6 +4855,509 @@
             "maxLength": 200
           }
         }
+      },
+      "DaySummary": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Civil day in Asia/Kolkata, `YYYY-MM-DD`."
+          },
+          "verifiedKm": {
+            "type": "number"
+          },
+          "earnings": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "date",
+          "verifiedKm",
+          "earnings"
+        ]
+      },
+      "EarningsSummary": {
+        "type": "object",
+        "properties": {
+          "availableBalance": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "Everything billable has earned, less nothing yet."
+              }
+            ]
+          },
+          "pendingBalance": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "What review is holding, valued at the rate stamped on the held segments — which is why a segment earning nothing still carries a rate."
+              }
+            ]
+          },
+          "monthVerifiedKm": {
+            "type": "number"
+          },
+          "monthEarnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "todayVerifiedKm": {
+            "type": "number"
+          },
+          "todayEarnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DaySummary"
+            },
+            "description": "The last 30 days that earned, newest first."
+          }
+        },
+        "required": [
+          "availableBalance",
+          "pendingBalance",
+          "monthVerifiedKm",
+          "monthEarnings",
+          "todayVerifiedKm",
+          "todayEarnings",
+          "history"
+        ]
+      },
+      "Trip": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tracking session this trip is."
+          },
+          "sequence": {
+            "type": "integer",
+            "description": "Position within the day, from 1."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres only. Held distance is not counted here."
+          },
+          "earnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected"
+            ],
+            "description": "A trip holding anything in review reads `pending_review`, even where most of it cleared: the badge answers whether the figure is final."
+          },
+          "zoneBreakdown": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "properties": {
+                "zone": {
+                  "type": "string",
+                  "enum": [
+                    "prime",
+                    "secondary",
+                    "network"
+                  ]
+                },
+                "km": {
+                  "type": "number"
+                },
+                "earnings": {
+                  "$ref": "#/components/schemas/Money"
+                }
+              },
+              "required": [
+                "zone",
+                "km",
+                "earnings"
+              ]
+            },
+            "description": "Null when nothing on this trip was billable, so there is nothing to split."
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "startedAt",
+          "endedAt",
+          "verifiedKm",
+          "earnings",
+          "status",
+          "zoneBreakdown"
+        ]
+      },
+      "DayDetail": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "totalVerifiedKm": {
+            "type": "number"
+          },
+          "totalEarnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "trips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trip"
+            },
+            "description": "Earliest first."
+          }
+        },
+        "required": [
+          "date",
+          "totalVerifiedKm",
+          "totalEarnings",
+          "trips"
+        ]
+      },
+      "DriverTripLeg": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "enum": [
+              "prime",
+              "secondary",
+              "network"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "BILLABLE",
+              "PENDING_REVIEW",
+              "NON_BILLABLE"
+            ]
+          },
+          "flagReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why this stretch has not been paid. Null unless it is held or refused."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "distanceKm": {
+            "type": "number"
+          },
+          "earnings": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "The driver's own earning for this stretch."
+              }
+            ]
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng"
+              ]
+            },
+            "description": "The line to draw, in order."
+          }
+        },
+        "required": [
+          "zone",
+          "state",
+          "flagReason",
+          "startedAt",
+          "endedAt",
+          "distanceKm",
+          "earnings",
+          "path"
+        ]
+      },
+      "DriverTrip": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null while the trip is still running."
+          },
+          "verifiedKm": {
+            "type": "number"
+          },
+          "earnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DriverTripLeg"
+            },
+            "description": "Consecutive stretches agreeing on zone, state and reason, merged into one run each. Refused and held stretches are included, so the map accounts for every kilometre the driver drove and not only the paid ones."
+          }
+        },
+        "required": [
+          "id",
+          "campaignName",
+          "startedAt",
+          "endedAt",
+          "verifiedKm",
+          "earnings",
+          "status",
+          "legs"
+        ]
+      },
+      "AuditDay": {
+        "type": "object",
+        "properties": {
+          "vehicle": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "registrationNumber": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "registrationNumber"
+            ],
+            "description": "The vehicle the plate resolved to, so the screen can show what it matched."
+          },
+          "date": {
+            "type": "string"
+          },
+          "totalVerifiedKm": {
+            "type": "number"
+          },
+          "totalEarnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "totalCharge": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "What the advertiser is charged for the same distance."
+              }
+            ]
+          },
+          "trips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trip"
+            },
+            "description": "Earliest first."
+          }
+        },
+        "required": [
+          "vehicle",
+          "date",
+          "totalVerifiedKm",
+          "totalEarnings",
+          "totalCharge",
+          "trips"
+        ]
+      },
+      "TripLeg": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "enum": [
+              "prime",
+              "secondary",
+              "network"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "BILLABLE",
+              "PENDING_REVIEW",
+              "NON_BILLABLE"
+            ]
+          },
+          "flagReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why this run earns nothing yet."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "distanceKm": {
+            "type": "number"
+          },
+          "advertiserRate": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "driverRate": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "advertiserCharge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "driverEarning": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "segments": {
+            "type": "integer",
+            "description": "How many priced segments were merged into this run."
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng"
+              ]
+            },
+            "description": "The line to draw, in order. Boundary crossings are reconstructed by walking the straight line between two fixes by cumulative distance, which is the same line the pipeline clipped."
+          }
+        },
+        "required": [
+          "zone",
+          "state",
+          "flagReason",
+          "startedAt",
+          "endedAt",
+          "distanceKm",
+          "advertiserRate",
+          "driverRate",
+          "advertiserCharge",
+          "driverEarning",
+          "segments",
+          "path"
+        ]
+      },
+      "TripDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vehicleRegistration": {
+            "type": "string"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "driverName": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null while the trip is still running."
+          },
+          "distanceKm": {
+            "type": "number"
+          },
+          "advertiserCharge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "driverEarning": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TripLeg"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "vehicleRegistration",
+          "campaignName",
+          "driverName",
+          "startedAt",
+          "endedAt",
+          "distanceKm",
+          "advertiserCharge",
+          "driverEarning",
+          "legs"
+        ]
       }
     },
     "parameters": {}
@@ -6663,7 +7168,7 @@
           "dashboards"
         ],
         "summary": "Last known position of every working vehicle",
-        "description": "Either portal. Vehicles with no live assignment are excluded; ones that have stopped reporting keep their last fix, because where a vehicle went quiet is the first thing anyone asks.",
+        "description": "Either portal. Vehicles with no live assignment are excluded; ones that have stopped reporting keep their last fix, because where a vehicle went quiet is the first thing anyone asks. An advertiser sees only vehicles carrying their own campaigns and needs `advertiser.tracking.read`; operations sees the fleet. `vehicleNumber` narrows either to one plate.",
         "security": [
           {
             "cookieAuth": []
@@ -6680,6 +7185,19 @@
             "description": "Omit for the whole fleet.",
             "name": "campaignId",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 16,
+              "description": "Whole or partial registration number. Spaces and hyphens are ignored, so `KA 01` matches `KA01AB1234`.",
+              "example": "KA01AB"
+            },
+            "required": false,
+            "description": "Whole or partial registration number. Spaces and hyphens are ignored, so `KA 01` matches `KA01AB1234`.",
+            "name": "vehicleNumber",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6693,8 +7211,38 @@
               }
             }
           },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing permission, or an audience with no fleet to watch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign on this account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11339,6 +11887,432 @@
           },
           "404": {
             "description": "Not this user's notification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/earnings": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "The driver's own earnings",
+        "description": "AC-23. Every figure is summed from `trip_segments` on each read, so what the phone shows and what a payout run computes cannot drift apart. Days are Asia/Kolkata days — a shift that ends at 01:00 belongs to the night it was driven, not to the UTC date it happened to fall on.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The wallet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/earnings/days/{date}": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "One day of trips",
+        "description": "What a row in the earnings history opens into: the trips behind that day and what each one earned.\n\nA trip is one tracking session — one press of Start to one press of Stop — because that is the unit the driver performed. The segments underneath are a pricing artefact and there are hundreds of them in an afternoon.\n\nA session driven through midnight appears on both days, carrying only the segments driven on each, and its times are the first and last of those. The day total therefore always equals the matching `history` row, so a driver who taps a figure never finds the trips inside it adding up to something else.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Civil day in Asia/Kolkata."
+            },
+            "required": true,
+            "description": "Civil day in Asia/Kolkata.",
+            "name": "date",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day. Zero totals and an empty list for a day not driven.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DayDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/trips/{id}": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "Where one of my trips went",
+        "description": "AC-24. The route behind a row in the day's trip list, so a driver can see the drive they are being paid for rather than take the distance on trust.\n\nThe line is returned as runs coloured by pricing zone, which is what makes a zoned rate card legible: two trips of the same length paying differently is explained by where they ran, and this is where that shows.\n\nHeld and refused stretches are included and marked. A driver whose map shows 26 km against a paid 24 km is owed the missing two and the reason for them.\n\nCarries no advertiser rate or charge. What the platform bills for a kilometre is not the driver's to see, and the response is built field by field rather than filtered so that it cannot become so by accident.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverTrip"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trip, or it belongs to another driver — the same answer for both, so a session id cannot be tested for existence.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/drivers/{id}/trips": {
+      "get": {
+        "tags": [
+          "admin-drivers"
+        ],
+        "summary": "One day of a driver's trips",
+        "description": "The same day the driver sees, for settling a question about it. Reading it does not change what is owed; releasing held distance is the review queue's job, not this endpoint's.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Civil day in Asia/Kolkata."
+            },
+            "required": true,
+            "description": "Civil day in Asia/Kolkata.",
+            "name": "date",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DayDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted to read drivers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such driver.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/gps-audit/trips": {
+      "get": {
+        "tags": [
+          "admin-drivers"
+        ],
+        "summary": "One day of a vehicle's trips",
+        "description": "AC-25. The screen that settles disputes, entered the way the dispute arrives: a plate and a date.\n\nKeyed on the vehicle rather than the driver, because an advertiser disputing an invoice is disputing distance their livery was carried, and the livery is on the car. A vehicle handed to a relief driver mid-campaign was still working, and filing that afternoon under a second person would split one day of billed kilometres in two.\n\nCarries the advertiser charge alongside the driver earning, which the driver-facing version of this day deliberately does not.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 16,
+              "description": "The registration on the vehicle. Matched exactly once punctuation and spacing are removed, so `KA 01 AB 1234` finds `KA01AB1234` — but a partial plate finds nothing, because an audit has to be about the vehicle you meant."
+            },
+            "required": true,
+            "description": "The registration on the vehicle. Matched exactly once punctuation and spacing are removed, so `KA 01 AB 1234` finds `KA01AB1234` — but a partial plate finds nothing, because an audit has to be about the vehicle you meant.",
+            "name": "vehicleNumber",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Civil day in Asia/Kolkata."
+            },
+            "required": true,
+            "description": "Civil day in Asia/Kolkata.",
+            "name": "date",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day. Zero totals and an empty list for a day the vehicle did not work.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditDay"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted to audit trips.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No vehicle carries that registration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/gps-audit/trips/{id}": {
+      "get": {
+        "tags": [
+          "admin-drivers"
+        ],
+        "summary": "One trip, opened up",
+        "description": "The priced ground underneath a trip: where it ran, which zone each stretch was classified into, the rate that applied and the money that followed.\n\nReturned as runs rather than raw segments. A segment is one pair of GPS fixes seconds apart, and an afternoon is thousands of them; consecutive segments agreeing on zone, state and flag reason are the same fact about the journey, so they are merged and counted. A trip that enters and leaves Prime is therefore several runs, not one — which is the whole point of looking.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not permitted to audit trips.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trip.",
             "content": {
               "application/json": {
                 "schema": {

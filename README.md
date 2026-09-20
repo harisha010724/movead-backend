@@ -509,6 +509,41 @@ modules:
   what is not owed and `PENDING_REVIEW` for what a human must decide, and a
   check constraint refuses money on both. **The review queue does not exist
   yet**, so held distance accrues with no way to release it.
+- **earnings and trip history**: `/v1/driver/earnings` is the wallet, and
+  `/v1/driver/earnings/days/{date}` is the day behind any figure in it — the
+  trips driven, what each earned, and which zones it earned in. A trip is one
+  tracking session, because that is the unit the driver performed; the segments
+  under it are a pricing artefact and there are hundreds in an afternoon. Both
+  bucket days in **Asia/Kolkata**, via `shared/time.ts`, which is the same
+  boundary the dashboards use — bucketing on the raw timestamp filed everything
+  earned between midnight and 05:30 under the previous day, so a driver who
+  finished at half past midnight opened today and was shown nothing.
+  `/v1/admin/drivers/{id}/trips?date=` is the same day, for whoever is
+  answering the driver's question about it.
+- **the driver's own route** (AC-24): `/v1/driver/trips/{id}` is the drive
+  behind a row in that day — the line it took, split into runs coloured by the
+  zone each ran through, which is what makes a zoned rate card legible when two
+  drives of the same length pay differently. Held and refused stretches come
+  back marked rather than dropped, so a map showing 26 km against a paid 24
+  accounts for the other two. It carries no advertiser rate or charge, and is a
+  separate endpoint from the audit rather than a filter over it: the response is
+  rebuilt field by field, so a field added to the audit leg later cannot reach a
+  phone by inheritance. Asking for a trip that belongs to someone else answers
+  404, the same as one that does not exist.
+- **the GPS audit** (AC-25, closing AC-21.8): `/v1/admin/gps-audit/trips` takes
+  a plate and a date, and `/v1/admin/gps-audit/trips/{id}` opens one of those
+  trips up. Keyed on the **vehicle**, not the driver, because an advertiser
+  disputing an invoice is disputing distance their livery was carried and the
+  livery is on the car — a vehicle handed to a relief driver mid-campaign was
+  still working. Carries the advertiser charge beside the driver earning, which
+  the driver-facing day deliberately does not, and it is the first route behind
+  `trip.audit` for that reason. A trip comes back as **runs** rather than
+  segments: consecutive pairs agreeing on zone, state and flag reason are one
+  fact about the journey, so they are merged and counted. The boundary
+  crossings are reconstructed rather than stored — a split pair keeps one pair
+  of fixes and a distance per part, so the crossing is recovered by walking
+  that straight line by cumulative distance, which is exact because it is the
+  same line the pipeline clipped.
 - **advertisers**: account and first login created together, then an invitation
   email; the customer chooses their own password and no credential is ever sent.
 - **mail**: SMTP in production, rendered to disk in development, with the
@@ -532,9 +567,7 @@ Still to build, each step usable before the next begins:
    editing a constant.
 3. **billing and payouts** — the wallet the charge draws down, the budget cap of
    AC-17, and the weekly payout run the earnings feed.
-4. **the GPS audit map** — AC-25, which also closes AC-21.8: the zone splits are
-   in the database and correct, and no one can look at them.
-5. **a real location provider on a real handset** — AC-09.6. Everything above
+4. **a real location provider on a real handset** — AC-09.6. Everything above
    was proved against a simulator that never loses signal and is never killed by
    a battery manager. Expect this to find things.
 

@@ -16,6 +16,7 @@ import {
   UpdateVehicleSchema,
   UploadDocumentSchema,
 } from '../../contracts/drivers';
+import { AuditDayQuerySchema, DayParamSchema } from '../../contracts/tracking';
 import { BadRequestError } from '../../shared/errors';
 import { currentUser } from '../../shared/http/middleware/auth';
 import { parseBody, parseParams, parseQuery } from '../../shared/http/validate';
@@ -319,6 +320,36 @@ export async function portalSetConsent(req: Request, res: Response): Promise<voi
 
 export async function portalEarnings(req: Request, res: Response): Promise<void> {
   res.json(await drivers.portalEarnings(requireDriverId(req)));
+}
+
+export async function portalDay(req: Request, res: Response): Promise<void> {
+  const { date } = parseParams(req, DayParamSchema);
+  res.json(await drivers.dayOfTrips(requireDriverId(req), date));
+}
+
+/** AC-24 — the route behind one of the caller's own trips. */
+export async function portalTrip(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  res.json(await drivers.ownTrip(requireDriverId(req), id));
+}
+
+/** The same day the driver sees, for an operator settling a question about it. */
+export async function driverTrips(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  const { date } = parseQuery(req, DayParamSchema);
+  res.json(await drivers.dayOfTrips(id, date));
+}
+
+/** AC-25 — a day of a vehicle's trips, found by the plate a dispute names. */
+export async function auditDay(req: Request, res: Response): Promise<void> {
+  const { vehicleNumber, date } = parseQuery(req, AuditDayQuerySchema);
+  res.json(await drivers.auditDay(vehicleNumber, date));
+}
+
+/** One of those trips, with the zone splits and rates behind its charge. */
+export async function auditTrip(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  res.json(await drivers.auditTrip(id));
 }
 
 export function portalCampaign(_req: Request, res: Response): void {

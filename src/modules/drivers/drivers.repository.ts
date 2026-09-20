@@ -69,6 +69,18 @@ export function findVehicle(id: string): Promise<Vehicle | null> {
   return Vehicle.findByPk(id);
 }
 
+/**
+ * The vehicle wearing this plate.
+ *
+ * Exact, not a substring: a plate is unique and an operator auditing a
+ * disputed kilometre needs the vehicle they typed, not the one that happens
+ * to share four digits with it. `registrationNumber` is stored already
+ * normalised, so the caller must normalise too.
+ */
+export function findVehicleByRegistration(registrationNumber: string): Promise<Vehicle | null> {
+  return Vehicle.findOne({ where: { registrationNumber } });
+}
+
 export function vehiclesFor(driverId: string): Promise<Vehicle[]> {
   return Vehicle.findAll({ where: { driverId }, order: [['createdAt', 'ASC']] });
 }

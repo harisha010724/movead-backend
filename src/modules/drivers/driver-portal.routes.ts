@@ -102,7 +102,20 @@ export function driverPortalRoutes(): Router {
   router.get('/me/consent', controller.portalConsent);
   router.put('/me/consent', controller.portalSetConsent);
 
+  /*
+   * The wallet, and the day behind any figure in it. Both are summed from
+   * segments on read, so tapping a day can only ever show the trips that
+   * produced the total above it.
+   */
   router.get('/earnings', controller.portalEarnings);
+  router.get('/earnings/days/:date', controller.portalDay);
+  /*
+   * AC-24. Outside `/earnings` because a trip is a drive, not a figure: the
+   * driver reaches it from the day list, but what it answers is "where did I
+   * go", and the money on it is a consequence of that rather than the subject.
+   */
+  router.get('/trips/:id', controller.portalTrip);
+
   router.get('/campaign', installations.driverCampaign);
   router.get('/campaign/creative', installations.driverCreative);
   router.post('/assignments/:id/accept', installations.driverAccept);
