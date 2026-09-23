@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest';
 
 import { pingDatabase, sequelize } from '../src/db/sequelize';
+import { computeMissing } from '../src/modules/impressions/impressions.service';
+import { loadBaselines, recomputeBaselines } from '../src/modules/traffic/traffic.service';
 
 import { type Agent, client, enrolAndVerify, signIn } from './helpers/admin';
 import { captureMail, type MailInbox } from './helpers/mail';
@@ -116,7 +118,8 @@ beforeEach(async (ctx: TestContext) => {
   await sequelize.query(
     `TRUNCATE users, user_sessions, user_invitations, audit_log, advertisers, campaigns,
      notifications, drivers, driver_consents, vehicles, campaign_vehicles, installations,
-     installation_photos, tracking_sessions, gps_points, trip_segments
+     installation_photos, tracking_sessions, gps_points, trip_segments, segment_impressions,
+     speed_baselines
      RESTART IDENTITY CASCADE`,
   );
   admin = await signIn();
@@ -1115,6 +1118,412 @@ describe('the driver looking at their own trip (AC-24)', () => {
   });
 });
 
+/**
+ * The feed behind the earnings history.
+ *
+ * The history used to be a list of dates, and a driver looking for a drive
+ * they remembered had to guess which date it was under. This lists the drives
+ * themselves, which is what they were looking for.
+ *
+ * It sums the same segments as the day list, so the cases that matter are
+ * again the ones about it agreeing with itself — plus the two the day list
+ * never had to answer: what happens to a trip that earned nothing, and what
+ * happens when the feed is longer than one page.
+ */
+describe('the trip feed behind the earnings history', () => {
+  it('names each trip by the campaign it was carrying', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const { trips } = await feed(driver);
+
+    expect(trips).toHaveLength(1);
+    expect(trips[0]?.id).toBe(sessionId);
+    expect(trips[0]?.campaignName).toBe(CAMPAIGN.name);
+  });
+
+  it('puts the most recent trip first', async () => {
+    const { driver } = await runningSession();
+    const [older, newer] = await twoTrips(driver);
+
+    const { trips } = await feed(driver);
+
+    expect(trips.map((trip) => trip.id)).toEqual([newer, older]);
+  });
+
+  /*
+   * The figure in the feed and the figure in the day list are the same money
+   * read two ways, so a driver who opens one after the other must not find
+   * them disagreeing about a trip they both name.
+   */
+  it('agrees with the day list about the same trip', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, crossCity());
+
+    const day = await dayOf(driver, await istToday());
+    const listed = day.trips.find((trip) => trip.id === sessionId);
+    const fed = (await feed(driver)).trips.find((trip) => trip.id === sessionId);
+
+    expect(fed?.verifiedKm).toBe(listed?.verifiedKm);
+    expect(fed?.earnings).toBe(listed?.earnings);
+    expect(fed?.status).toBe(listed?.status);
+  });
+
+  /*
+   * A shift that is still being checked is a shift the driver drove. Dropping
+   * it until it clears is how someone comes to believe the app lost a morning,
+   * so it is listed, marked, and paying nothing yet.
+   */
+  it('keeps a trip that is still under review, earning nothing yet', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, underReview());
+
+    const { trips } = await feed(driver);
+
+    expect(trips.map((trip) => trip.id)).toContain(sessionId);
+    expect(trips[0]?.status).toBe('pending_review');
+    expect(trips[0]?.verifiedKm).toBe(0);
+    expect(Number(trips[0]?.earnings)).toBe(0);
+  });
+
+  /*
+   * Paged on the trip's own start time, not an offset. The feed grows at the
+   * top while it is being scrolled, and an offset would hand the phone the
+   * same trip twice the moment a new one landed between two pages.
+   */
+  it('pages on the trip start time, without repeating a trip', async () => {
+    const { driver } = await runningSession();
+    const [older, newer] = await twoTrips(driver);
+
+    const first = await feed(driver, { limit: 1 });
+    expect(first.trips.map((trip) => trip.id)).toEqual([newer]);
+    expect(first.nextBefore).toBe(first.trips[0]?.startedAt);
+
+    const second = await feed(driver, { limit: 1, before: String(first.nextBefore) });
+    expect(second.trips.map((trip) => trip.id)).toEqual([older]);
+  });
+
+  it('stops offering a cursor at the end of the feed', async () => {
+    const { driver } = await runningSession();
+    await twoTrips(driver);
+
+    const { trips, nextBefore } = await feed(driver, { limit: 20 });
+
+    expect(trips).toHaveLength(2);
+    expect(nextBefore).toBeNull();
+  });
+
+  it("shows a driver none of another driver's trips", async () => {
+    const mine = await runningSession();
+    await upload(mine.driver, mine.sessionId, straightRun());
+    const stranger = await runningSession(OTHER_DRIVER);
+
+    const { trips } = await feed(stranger.driver);
+
+    expect(trips).toEqual([]);
+  });
+
+  it('refuses a page larger than it will serve', async () => {
+    const driver = await drivingDriver();
+    await driver.get('/v1/driver/trips?limit=500').expect(400);
+  });
+
+  it('is closed to a caller who is not signed in', async () => {
+    await client().get('/v1/driver/trips').expect(401);
+  });
+});
+
+// ------------------------------------------------------- the fleet as sensor
+
+/**
+ * The same trace that produced the invoice, read a second way.
+ *
+ * Nothing here bills. The point is that a shift already carries a measurement
+ * of the roads it was driven on, and that the platform can have it without
+ * buying a traffic feed — which is the asset the impression model is built on.
+ */
+describe('learning what a road looks like when it is clear', () => {
+  /** Where `straightRun` drives: 12.97–12.98 N at 77.61 E is one cell. */
+  const DRIVEN_CELL = '1297:7761';
+
+  it('turns a shift into a baseline for the cell it was driven in', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const result = await recomputeBaselines();
+
+    // One cell, and at least one hour of it — the run is 90 seconds, so it
+    // lands in one hour of the week unless it happens to straddle the turn.
+    expect(result.cells).toBe(1);
+    expect(result.cellHours).toBeGreaterThanOrEqual(1);
+
+    const rows = (await sequelize.query(
+      `SELECT grid_key, free_flow_kmh, sample_count
+         FROM speed_baselines
+        WHERE hour_of_week IS NULL`,
+      { type: 'SELECT' },
+    )) as { grid_key: string; free_flow_kmh: string; sample_count: number }[];
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.grid_key).toBe(DRIVEN_CELL);
+
+    // Four fixes, three pairs, three observations — and about 33 km/h, which
+    // is 278 m of latitude every 30 seconds.
+    expect(rows[0]?.sample_count).toBe(3);
+    expect(Number(rows[0]?.free_flow_kmh)).toBeGreaterThan(30);
+    expect(Number(rows[0]?.free_flow_kmh)).toBeLessThan(37);
+  });
+
+  /**
+   * The measurement is stored; what it is allowed to claim is decided on read.
+   * Three observations is a fact about one vehicle, not a description of a
+   * road, and the ladder says so by falling through to the zone default.
+   */
+  it('will not let three observations describe a road', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+    await recomputeBaselines();
+
+    const lookup = await loadBaselines([DRIVEN_CELL]);
+
+    expect(lookup.for(DRIVEN_CELL, 40, 'PRIME')).toMatchObject({
+      source: 'ZONE_DEFAULT',
+      sampleCount: 0,
+    });
+  });
+
+  /** Every job on the queue has to survive a retry. */
+  it('is safe to run twice', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const first = await recomputeBaselines();
+    const second = await recomputeBaselines();
+
+    expect(second).toEqual(first);
+  });
+
+  it('learns nothing from a day nobody drove', async () => {
+    expect(await recomputeBaselines()).toEqual({ cells: 0, cellHours: 0 });
+  });
+});
+
+/**
+ * The same segments a third way: as an audience.
+ *
+ * These figures are modelled, not measured, and nothing bills off them. What
+ * has to hold is that they attach only to driving the platform was willing to
+ * charge for, that they carry the evidence they were derived from, and that
+ * the job producing them can be run again without producing them twice.
+ */
+describe('expressing a shift as an audience', () => {
+  /**
+   * Four fixes, so three pairs. The last fix is too inaccurate to bill
+   * without review, which holds the pair that reaches it.
+   */
+  async function aShiftWithOneHeldPair(): Promise<void> {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, [
+      fix({ lat: 12.9715, seconds: 0 }),
+      fix({ lat: 12.973, seconds: 30 }),
+      fix({ lat: 12.9745, seconds: 60 }),
+      fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
+    ]);
+
+    await recomputeBaselines();
+  }
+
+  it('gives the billable kilometres an audience and the held ones none', async () => {
+    await aShiftWithOneHeldPair();
+
+    expect(await computeMissing()).toMatchObject({ computed: 2 });
+
+    expect(
+      await countOf("SELECT count(*)::int AS n FROM trip_segments WHERE state = 'PENDING_REVIEW'"),
+    ).toBe(1);
+
+    const rows = (await sequelize.query(
+      `SELECT s.state, si.impressions
+         FROM segment_impressions si
+         JOIN trip_segments s ON s.id = si.segment_id`,
+      { type: 'SELECT' },
+    )) as { state: string; impressions: string }[];
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.state === 'BILLABLE')).toBe(true);
+    expect(rows.every((row) => Number(row.impressions) > 0)).toBe(true);
+  });
+
+  /**
+   * A figure resting on a per-zone default is a weaker claim than one resting
+   * on thousands of observations, and the row has to say which it is. Three
+   * segments is nowhere near enough to describe a road, so every figure here
+   * should admit to being a default.
+   */
+  it('records which rung of the baseline ladder each figure rests on', async () => {
+    await aShiftWithOneHeldPair();
+    await computeMissing();
+
+    const rows = (await sequelize.query(
+      `SELECT baseline_source, baseline_kmh, observed_kmh, model_version
+         FROM segment_impressions`,
+      { type: 'SELECT' },
+    )) as {
+      baseline_source: string;
+      baseline_kmh: string;
+      observed_kmh: string;
+      model_version: string;
+    }[];
+
+    expect(rows.every((row) => row.baseline_source === 'ZONE_DEFAULT')).toBe(true);
+    expect(rows.every((row) => Number(row.baseline_kmh) === 34)).toBe(true);
+    expect(rows.every((row) => row.model_version === 'v1.0.0')).toBe(true);
+
+    /*
+     * Derived from the segment's own distance and duration: 167 m every 30
+     * seconds is 20 km/h. Every one of these fixes reported `speedMps: 11`,
+     * which is 40 km/h — so a model reading the handset would have doubled the
+     * speed, halved the congestion, and under-counted the audience. The
+     * pipeline refuses that number when checking for fraud; the impression
+     * model has to refuse it for the same reason.
+     */
+    expect(rows.every((row) => Number(row.observed_kmh) > 18)).toBe(true);
+    expect(rows.every((row) => Number(row.observed_kmh) < 22)).toBe(true);
+  });
+
+  it('does not count a kilometre twice when it runs again', async () => {
+    await aShiftWithOneHeldPair();
+
+    expect(await computeMissing()).toMatchObject({ computed: 2 });
+    expect(await computeMissing()).toMatchObject({ computed: 0 });
+
+    expect(await countOf('SELECT count(*)::int AS n FROM segment_impressions')).toBe(2);
+  });
+
+  it('has nothing to say about a day nobody drove', async () => {
+    expect(await computeMissing()).toMatchObject({ computed: 0 });
+  });
+});
+
+/**
+ * The advertiser's side of the same segments.
+ *
+ * The admin audit of this driving exposes both halves of the money and sits
+ * behind its own permission for that reason. This is its mirror: the same
+ * kilometres, the audience modelled from them, and nothing at all about the
+ * person who drove them.
+ */
+describe('what the advertiser is shown', () => {
+  async function aDrivenCampaign(): Promise<{ advertiser: Agent; campaignId: string }> {
+    const { driver, sessionId, campaignId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+    await recomputeBaselines();
+    await computeMissing();
+
+    return { advertiser: await advertiserPortal(), campaignId };
+  }
+
+  it('reports the audience beside the distance it was derived from', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/impressions`).expect(200);
+
+    expect(body).toMatchObject({ campaignId, modelVersion: 'v1.0.0' });
+
+    // Never the audience alone: the kilometres are what the contract is
+    // written in, and the impressions are the modelled translation of them.
+    expect(body.verifiedKm).toBeGreaterThan(0);
+    expect(body.impressions).toBeGreaterThan(0);
+    expect(Number(body.cpm)).toBeGreaterThan(0);
+
+    expect(body.byZone).toHaveLength(1);
+    expect(body.byZone[0]).toMatchObject({ zone: 'prime' });
+    expect(body.byDay).toHaveLength(1);
+  });
+
+  /**
+   * The claim no competitor renting a traffic feed can make: not just how big
+   * the audience was, but how much of that number is measurement. Three
+   * observations of one cell is not a measured road, so this campaign's
+   * figures should own up to resting entirely on a default.
+   */
+  it('says how much of the figure rests on measurement', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/impressions`).expect(200);
+    const mix = body.baselineMix as { cellHour: number; cell: number; zoneDefault: number };
+
+    expect(mix.cellHour + mix.cell + mix.zoneDefault).toBeCloseTo(1, 4);
+    expect(mix.zoneDefault).toBe(1);
+  });
+
+  /**
+   * Asserted against the serialised body rather than against named fields,
+   * because the failure being guarded is a field nobody meant to add.
+   */
+  it('carries nothing about the driver or what they earned', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/impressions`).expect(200);
+    const raw = JSON.stringify(body);
+
+    expect(raw).not.toContain(DRIVER.name);
+    expect(raw).not.toContain(DRIVER.mobile);
+    expect(raw).not.toMatch(/driver/i);
+  });
+
+  it('shows its working for a day', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+    const today = await istToday();
+
+    const { body } = await advertiser
+      .get(`/v1/campaigns/${campaignId}/impressions/days/${today}`)
+      .expect(200);
+
+    expect(body).toMatchObject({ campaignId, date: today });
+    expect(body.working).toMatchObject({
+      jamDensity: 150,
+      occupantsPerVehicle: 1.5,
+      lineOfSightShare: 0.3,
+      wrapQuality: 0.85,
+    });
+
+    // The two speeds the congestion was read from, so the density claim can be
+    // checked by hand rather than taken on trust.
+    expect(body.working.medianObservedKmh).toBeGreaterThan(30);
+    expect(body.working.medianBaselineKmh).toBe(34);
+  });
+
+  it('answers a day the campaign did not run with zeroes rather than nothing', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    const { body } = await advertiser
+      .get(`/v1/campaigns/${campaignId}/impressions/days/2026-01-01`)
+      .expect(200);
+
+    expect(body).toMatchObject({ impressions: 0, verifiedKm: 0, cpm: '0.00' });
+    expect(body.byZone).toEqual([]);
+  });
+
+  /** Not theirs is not found, rather than forbidden. */
+  it('does not answer for a campaign the advertiser does not own', async () => {
+    await aDrivenCampaign();
+    const advertiser = await advertiserPortal();
+
+    await advertiser.get(`/v1/campaigns/${randomUUID()}/impressions`).expect(404);
+  });
+
+  it('refuses an id that is not one', async () => {
+    const advertiser = await advertiserPortal();
+    await advertiser.get('/v1/campaigns/not-a-uuid/impressions').expect(400);
+  });
+
+  it('is closed to a caller who is not signed in', async () => {
+    const { campaignId } = await aDrivenCampaign();
+    await client().get(`/v1/campaigns/${campaignId}/impressions`).expect(401);
+  });
+});
+
 // ------------------------------------------------------------------ fixtures
 
 /**
@@ -1225,6 +1634,55 @@ async function ownTrip(driver: Agent, sessionId: string): Promise<DriverTripBody
   return response.body as DriverTripBody;
 }
 
+interface TripFeedBody {
+  trips: {
+    id: string;
+    campaignName: string;
+    startedAt: string;
+    endedAt: string;
+    verifiedKm: number;
+    earnings: string;
+    status: string;
+  }[];
+  nextBefore: string | null;
+}
+
+async function feed(
+  driver: Agent,
+  query: { limit?: number; before?: string } = {},
+): Promise<TripFeedBody> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.before !== undefined) params.set('before', query.before);
+
+  const suffix = params.toString();
+  const response = await driver.get(`/v1/driver/trips${suffix ? `?${suffix}` : ''}`).expect(200);
+  return response.body as TripFeedBody;
+}
+
+/**
+ * Two finished trips for one driver, ten minutes apart, returned oldest first.
+ *
+ * Separated in time on purpose: the feed orders on start time, and two runs
+ * uploaded in the same millisecond would let a broken `ORDER BY` pass.
+ */
+async function twoTrips(driver: Agent): Promise<[string, string]> {
+  const older = await nextSession(driver);
+  await upload(driver, older, straightRun());
+
+  const newer = await nextSession(driver);
+  await upload(driver, newer, straightRun(600));
+
+  return [older, newer];
+}
+
+/** Closes whatever session is open and starts the next one. */
+async function nextSession(driver: Agent): Promise<string> {
+  await driver.delete('/v1/driver/tracking/session').send({}).expect(200);
+  const started = await driver.post('/v1/driver/tracking/session').send({}).expect(200);
+  return String(started.body.id);
+}
+
 /** One session north through Prime, unzoned ground and Secondary. */
 async function drivenAcrossTheCity(): Promise<TripDetailBody> {
   const { driver, sessionId } = await runningSession();
@@ -1288,6 +1746,17 @@ function fix(input: {
  */
 function crossCity() {
   return [fix({ lat: 12.975, seconds: 0 }), fix({ lat: 13.0, seconds: 110 })];
+}
+
+/**
+ * The same climb, every fix too coarse to price on. Nothing here is billable,
+ * so the whole trip lands in review — which is the state the feed has to keep
+ * showing rather than quietly drop.
+ */
+function underReview() {
+  return [12.9715, 12.974, 12.9765, 12.979].map((lat, index) =>
+    fix({ lat, seconds: index * 30, accuracyM: 65 }),
+  );
 }
 
 /** Four fixes climbing through the Prime box: about 0.8 km, all billable. */

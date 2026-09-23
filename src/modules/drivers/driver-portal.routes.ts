@@ -113,7 +113,11 @@ export function driverPortalRoutes(): Router {
    * AC-24. Outside `/earnings` because a trip is a drive, not a figure: the
    * driver reaches it from the day list, but what it answers is "where did I
    * go", and the money on it is a consequence of that rather than the subject.
+   *
+   * The feed is the same reasoning one level up. A driver scrolling their
+   * history is looking for a drive they remember making, not for a date.
    */
+  router.get('/trips', controller.portalTrips);
   router.get('/trips/:id', controller.portalTrip);
 
   router.get('/campaign', installations.driverCampaign);

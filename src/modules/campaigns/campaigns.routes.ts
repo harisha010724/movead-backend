@@ -4,6 +4,8 @@ import multer from 'multer';
 import { BadRequestError } from '../../shared/errors';
 import { requireAuth, requirePermission } from '../../shared/http/middleware/auth';
 
+import * as impressions from '../impressions/impressions.controller';
+
 import * as controller from './campaigns.controller';
 import './campaigns.model';
 
@@ -66,6 +68,24 @@ export function campaignRoutes(): Router {
   );
   router.get('/:id', requirePermission('advertiser.campaign.read'), controller.get);
   router.patch('/:id', requirePermission('advertiser.campaign.create'), controller.update);
+
+  /*
+   * Reading the campaign's own results needs no permission beyond reading the
+   * campaign. The admin audit of the same segments is a separate grant because
+   * it exposes what the driver earned as well as what the advertiser paid;
+   * this side carries neither the driver nor their money, so there is nothing
+   * here an advertiser who can already open the campaign should not see.
+   */
+  router.get(
+    '/:id/impressions',
+    requirePermission('advertiser.campaign.read'),
+    impressions.forCampaign,
+  );
+  router.get(
+    '/:id/impressions/days/:date',
+    requirePermission('advertiser.campaign.read'),
+    impressions.forDay,
+  );
 
   return router;
 }

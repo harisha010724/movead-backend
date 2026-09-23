@@ -20,6 +20,8 @@ export const QueueName = {
   AccrueEarnings: 'accrue.earnings',
   RunPayouts: 'payouts.run',
   ArchivePartitions: 'archive.partitions',
+  RecomputeSpeedBaselines: 'traffic.baselines.recompute',
+  ComputeImpressions: 'impressions.compute',
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];

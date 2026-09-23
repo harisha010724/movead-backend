@@ -64,6 +64,53 @@ export function haversineKm(from: LatLng, to: LatLng): number {
 
 export type Zone = 'prime' | 'secondary' | 'network';
 
+/**
+ * How finely the map is diced for aggregating observations across vehicles.
+ *
+ * A hundredth of a degree: about 1.1 km north to south, and much the same east
+ * to west at Indian latitudes. Small enough that an arterial and the lane
+ * behind it usually fall in different cells, large enough that one cell
+ * gathers a usable sample from a small fleet within weeks.
+ *
+ * A grid rather than a road network because there is no road network in this
+ * database. Snapping to OpenStreetMap ways would be better and is not free;
+ * this is the approximation that costs nothing and can be replaced later
+ * without moving anything that reads it.
+ */
+export const GRID_CELLS_PER_DEGREE = 100;
+
+/**
+ * The cell a fix falls in.
+ *
+ * Rounded before flooring, and the rounding is not decorative: `77.1 * 100` is
+ * `7709.999999999999` in binary floating point, so a bare `Math.floor` files
+ * the fix one cell west of where it happened. Postgres does the same
+ * arithmetic in exact decimal and gets 7710, so the two would disagree —
+ * silently, and only at some coordinates. Sixteen of them fall in the
+ * longitude band Delhi sits in.
+ */
+export function gridKeyFor(point: LatLng): string {
+  const cell = (degrees: number): number =>
+    Math.floor(Number((degrees * GRID_CELLS_PER_DEGREE).toFixed(6)));
+
+  return `${cell(point.lat)}:${cell(point.lng)}`;
+}
+
+/**
+ * The same key computed in Postgres, for aggregating over millions of rows
+ * without dragging them all through Node.
+ *
+ * Two implementations of one key is a drift risk, so it is a tested claim
+ * rather than a comment: `test/traffic.test.ts` runs both over the same
+ * coordinates and asserts they agree.
+ */
+export function gridKeySql(latColumn: string, lonColumn: string): string {
+  const cell = (column: string): string =>
+    `floor(${column} * ${GRID_CELLS_PER_DEGREE})::bigint::text`;
+
+  return `(${cell(latColumn)} || ':' || ${cell(lonColumn)})`;
+}
+
 export interface ZonedPart {
   zone: Zone;
   distanceKm: number;

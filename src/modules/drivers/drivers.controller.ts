@@ -16,7 +16,7 @@ import {
   UpdateVehicleSchema,
   UploadDocumentSchema,
 } from '../../contracts/drivers';
-import { AuditDayQuerySchema, DayParamSchema } from '../../contracts/tracking';
+import { AuditDayQuerySchema, DayParamSchema, TripFeedQuerySchema } from '../../contracts/tracking';
 import { BadRequestError } from '../../shared/errors';
 import { currentUser } from '../../shared/http/middleware/auth';
 import { parseBody, parseParams, parseQuery } from '../../shared/http/validate';
@@ -331,6 +331,17 @@ export async function portalDay(req: Request, res: Response): Promise<void> {
 export async function portalTrip(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
   res.json(await drivers.ownTrip(requireDriverId(req), id));
+}
+
+/** The caller's own trips across days, for the earnings feed. */
+export async function portalTrips(req: Request, res: Response): Promise<void> {
+  const query = parseQuery(req, TripFeedQuerySchema);
+  res.json(
+    await drivers.ownTrips(requireDriverId(req), {
+      ...(query.limit === undefined ? {} : { limit: query.limit }),
+      ...(query.before === undefined ? {} : { before: query.before }),
+    }),
+  );
 }
 
 /** The same day the driver sees, for an operator settling a question about it. */

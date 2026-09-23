@@ -166,6 +166,40 @@ export const DayParamSchema = z.object({
     .describe('Civil day in Asia/Kolkata.'),
 });
 
+export const RecentTripSchema = registry.register(
+  'RecentTrip',
+  z.object({
+    id: z.uuid().describe('The tracking session this trip is. Opens into its route.'),
+    campaignName: z
+      .string()
+      .describe('The campaign whose livery the vehicle was carrying, which is what names the trip.'),
+    startedAt: z.string(),
+    endedAt: z.string(),
+    verifiedKm: z.number().describe('Billable kilometres only. Held distance is not counted here.'),
+    earnings: MoneySchema,
+    status: z.enum(['verified', 'pending_review', 'rejected']),
+  }),
+);
+
+export const RecentTripsSchema = registry.register(
+  'RecentTrips',
+  z.object({
+    trips: z.array(RecentTripSchema).describe('Newest first.'),
+    nextBefore: z
+      .string()
+      .nullable()
+      .describe('Pass back as `before` for the next page. Null at the end of the feed.'),
+  }),
+);
+
+export const TripFeedQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  before: z
+    .string()
+    .optional()
+    .describe('Cursor: return trips that started strictly before this instant.'),
+});
+
 export const DriverTripLegSchema = registry.register(
   'DriverTripLeg',
   z.object({
@@ -304,6 +338,29 @@ registry.registerPath({
       description: 'The day. Zero totals and an empty list for a day not driven.',
       content: json(DayDetailSchema),
     },
+    400: commonErrorResponses[400],
+    401: commonErrorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/driver/trips',
+  tags: ['driver-portal'],
+  summary: 'My recent trips',
+  description: [
+    'The driver\'s own trips across days, newest first — what the earnings history opens with rather than a list of dates.',
+    '',
+    'Both this and the day-bucketed history are sums over the same segments, so they cannot disagree about a figure. They answer different questions: the history answers "what did I earn on Tuesday", and this answers "what have I been doing", which is what someone opening the app is usually looking for.',
+    '',
+    'A trip that earned nothing is included and carries its status. A refused shift is still a thing the driver did, and omitting it is how a driver comes to believe the app lost a morning.',
+    '',
+    'Paged on the trip\'s own start time rather than an offset, because the feed grows at the top while it is being read.',
+  ].join('\n'),
+  security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+  request: { query: TripFeedQuerySchema },
+  responses: {
+    200: { description: 'A page of trips.', content: json(RecentTripsSchema) },
     400: commonErrorResponses[400],
     401: commonErrorResponses[401],
   },

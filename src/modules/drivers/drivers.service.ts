@@ -2120,6 +2120,11 @@ export function ownTrip(driverId: string, sessionId: string) {
   return tracking.driverTrip(driverId, sessionId);
 }
 
+/** The driver's own trips across days, newest first. */
+export function ownTrips(driverId: string, options: { limit?: number; before?: string | null }) {
+  return tracking.recentTrips(driverId, options);
+}
+
 function applyLocation(driver: Driver, location: DriverLocationInput): void {
   const pin = locationColumns(location);
   driver.city = pin.city;

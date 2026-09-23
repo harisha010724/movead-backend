@@ -14,6 +14,7 @@ import './dashboards';
 import './drivers';
 import './health';
 import './identity';
+import './impressions';
 import './installations';
 import './invitations';
 import './notifications';

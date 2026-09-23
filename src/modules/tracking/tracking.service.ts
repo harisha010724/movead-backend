@@ -680,6 +680,94 @@ async function dayOf(
   };
 }
 
+// --- The driver's own trip feed ------------------------------------------
+
+export interface RecentTripView {
+  id: string;
+  /** The campaign the livery was carrying, which is what names the trip. */
+  campaignName: string;
+  startedAt: string;
+  endedAt: string;
+  verifiedKm: number;
+  earnings: Money;
+  status: TripStatus;
+}
+
+export interface RecentTripsView {
+  trips: RecentTripView[];
+  /**
+   * Cursor for the next page, or null at the end. The start time of the oldest
+   * trip returned, so the next request asks for everything before it.
+   */
+  nextBefore: string | null;
+}
+
+interface RecentTripRow extends TripRow {
+  campaign_name: string;
+}
+
+/** Enough for a long scroll, bounded so one request cannot ask for a year. */
+const MAX_TRIP_PAGE = 50;
+
+/**
+ * Recent trips across days, newest first.
+ *
+ * The day-bucketed history answers "what did I earn on Tuesday"; this answers
+ * "what have I been doing", which is the question a driver opening the app
+ * actually has. Both are sums over the same segments, so they cannot disagree.
+ *
+ * Unlike the earnings history, a trip that earned nothing is included. A shift
+ * that was refused, or is still being reviewed, is a thing the driver did and
+ * has a reason attached to it; leaving it out of the list is how a driver
+ * comes to believe the app lost a morning's work.
+ *
+ * Paged on the trip's own start time rather than an offset, because the feed
+ * grows at the top while it is being read and an offset would show the same
+ * trip twice.
+ */
+export async function recentTrips(
+  driverId: string,
+  options: { limit?: number; before?: string | null } = {},
+): Promise<RecentTripsView> {
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), MAX_TRIP_PAGE);
+  const before = options.before ?? null;
+
+  const rows = await sequelize.query<RecentTripRow>(
+    `SELECT s.session_id,
+            c.name AS campaign_name,
+            min(s.started_at) AS started_at,
+            max(s.ended_at)   AS ended_at,
+            COALESCE(SUM(s.distance_km)    FILTER (WHERE s.state = 'BILLABLE'), 0) AS km,
+            COALESCE(SUM(s.driver_earning) FILTER (WHERE s.state = 'BILLABLE'), 0) AS earnings,
+            count(*) FILTER (WHERE s.state = 'BILLABLE')       AS billable,
+            count(*) FILTER (WHERE s.state = 'PENDING_REVIEW') AS pending
+       FROM trip_segments s
+       JOIN campaigns c ON c.id = s.campaign_id
+      WHERE s.driver_id = :driverId
+      GROUP BY s.session_id, c.name
+     HAVING :before::timestamptz IS NULL OR min(s.started_at) < :before::timestamptz
+      ORDER BY min(s.started_at) DESC
+      LIMIT :limit`,
+    { replacements: { driverId, before, limit }, type: QueryTypes.SELECT },
+  );
+
+  const trips = rows.map((row) => ({
+    id: row.session_id,
+    campaignName: row.campaign_name,
+    startedAt: row.started_at.toISOString(),
+    endedAt: row.ended_at.toISOString(),
+    verifiedKm: asKm(row.km),
+    earnings: toPayable(money(row.earnings)),
+    status: statusOf(row),
+  }));
+
+  // Only when the page was filled. A short page is the end of the feed, and
+  // offering a cursor there costs the phone a round trip to learn nothing.
+  const last = trips.length === limit ? trips.at(-1) : undefined;
+
+  return { trips, nextBefore: last?.startedAt ?? null };
+}
+
 /**
  * A trip holding anything in review reads as in review, even where most of it
  * cleared. The badge answers "is this figure final?", and for a mixed trip the

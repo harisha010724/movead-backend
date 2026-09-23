@@ -29,3 +29,16 @@ export function istDate(column: string): string {
 export function istMonth(column: string): string {
   return `date_trunc('month', ${column} AT TIME ZONE :zone)`;
 }
+
+/**
+ * Which of the week's 168 hours a timestamp falls in, Monday 00:00 being 0.
+ *
+ * Traffic repeats weekly, not daily: a Tuesday evening and a Sunday evening on
+ * the same road are different roads as far as congestion goes. Bucketing by
+ * hour-of-day alone would average the two into a figure describing neither.
+ */
+export function istHourOfWeek(column: string): string {
+  const local = `${column} AT TIME ZONE :zone`;
+
+  return `((EXTRACT(ISODOW FROM ${local})::int - 1) * 24 + EXTRACT(HOUR FROM ${local})::int)`;
+}

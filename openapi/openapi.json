@@ -3965,6 +3965,294 @@
           "emailChange"
         ]
       },
+      "ZoneImpressions": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "enum": [
+              "prime",
+              "secondary",
+              "network"
+            ]
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres driven in this zone."
+          },
+          "impressions": {
+            "type": "integer",
+            "description": "Modelled, and rounded only here at the edge."
+          },
+          "charge": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "What these kilometres cost, at the zone rate."
+              }
+            ]
+          }
+        },
+        "required": [
+          "zone",
+          "verifiedKm",
+          "impressions",
+          "charge"
+        ]
+      },
+      "DayImpressions": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Civil day in Asia/Kolkata, `YYYY-MM-DD`."
+          },
+          "verifiedKm": {
+            "type": "number"
+          },
+          "impressions": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "verifiedKm",
+          "impressions"
+        ]
+      },
+      "BaselineMix": {
+        "type": "object",
+        "properties": {
+          "cellHour": {
+            "type": "number",
+            "description": "Share resting on measurement of that road in that hour of the week."
+          },
+          "cell": {
+            "type": "number",
+            "description": "Share resting on measurement of that road across the week."
+          },
+          "zoneDefault": {
+            "type": "number",
+            "description": "Share resting on a flat per-zone assumption, because the road is barely driven yet."
+          }
+        },
+        "required": [
+          "cellHour",
+          "cell",
+          "zoneDefault"
+        ],
+        "description": "How much of the reported audience is measurement and how much is assumption, as shares of the impressions. The figure a competitor cannot publish, because a rented traffic feed cannot say which of its roads it actually knows."
+      },
+      "CampaignImpressions": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "modelVersion": {
+            "type": "string",
+            "description": "Which set of assumptions produced these figures. A campaign is pinned to one."
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "The billable distance behind the audience. Provable, and what the contract is denominated in."
+          },
+          "impressions": {
+            "type": "integer",
+            "description": "Modelled opportunities-to-see, counted gross."
+          },
+          "charge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "cpm": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "Cost per thousand impressions — the figure that compares to other media."
+              }
+            ]
+          },
+          "byZone": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneImpressions"
+            }
+          },
+          "byDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayImpressions"
+            },
+            "description": "Oldest first. Days with no billable driving are absent."
+          },
+          "baselineMix": {
+            "$ref": "#/components/schemas/BaselineMix"
+          }
+        },
+        "required": [
+          "campaignId",
+          "campaignName",
+          "modelVersion",
+          "verifiedKm",
+          "impressions",
+          "charge",
+          "cpm",
+          "byZone",
+          "byDay",
+          "baselineMix"
+        ]
+      },
+      "ImpressionWorking": {
+        "type": "object",
+        "properties": {
+          "jamDensity": {
+            "type": "number",
+            "description": "Vehicles in a kilometre of one lane, bumper to bumper."
+          },
+          "occupantsPerVehicle": {
+            "type": "number",
+            "description": "Mean across the traffic mix, not per cab."
+          },
+          "lineOfSightShare": {
+            "type": "number",
+            "description": "Share of people present who could see the wrap at all. Geometry, not print quality."
+          },
+          "wrapQuality": {
+            "type": "number",
+            "description": "How legible the wrap is, for those who can see it."
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "zone": {
+                  "type": "string",
+                  "enum": [
+                    "prime",
+                    "secondary",
+                    "network"
+                  ]
+                },
+                "lanes": {
+                  "type": "number",
+                  "description": "Lanes within viewing range, both directions."
+                },
+                "pedestrianDensity": {
+                  "type": "number",
+                  "description": "People on foot per kilometre. The one input with no measurement behind it."
+                }
+              },
+              "required": [
+                "zone",
+                "lanes",
+                "pedestrianDensity"
+              ]
+            }
+          },
+          "medianObservedKmh": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "How fast the fleet actually moved, derived from distance and duration."
+          },
+          "medianBaselineKmh": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "What those roads do when clear. The gap between the two is the congestion."
+          }
+        },
+        "required": [
+          "jamDensity",
+          "occupantsPerVehicle",
+          "lineOfSightShare",
+          "wrapQuality",
+          "zones",
+          "medianObservedKmh",
+          "medianBaselineKmh"
+        ],
+        "description": "Every coefficient that was multiplied, so the arithmetic can be repeated by hand."
+      },
+      "CampaignDayImpressions": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "date": {
+            "type": "string"
+          },
+          "modelVersion": {
+            "type": "string",
+            "description": "Which set of assumptions produced these figures. A campaign is pinned to one."
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "The billable distance behind the audience. Provable, and what the contract is denominated in."
+          },
+          "impressions": {
+            "type": "integer",
+            "description": "Modelled opportunities-to-see, counted gross."
+          },
+          "charge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "cpm": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "Cost per thousand impressions — the figure that compares to other media."
+              }
+            ]
+          },
+          "byZone": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneImpressions"
+            }
+          },
+          "byDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayImpressions"
+            },
+            "description": "Oldest first. Days with no billable driving are absent."
+          },
+          "baselineMix": {
+            "$ref": "#/components/schemas/BaselineMix"
+          },
+          "working": {
+            "$ref": "#/components/schemas/ImpressionWorking"
+          }
+        },
+        "required": [
+          "campaignId",
+          "date",
+          "modelVersion",
+          "verifiedKm",
+          "impressions",
+          "charge",
+          "cpm",
+          "byZone",
+          "byDay",
+          "baselineMix",
+          "working"
+        ]
+      },
       "AssignmentStatus": {
         "type": "string",
         "enum": [
@@ -5031,6 +5319,73 @@
           "totalVerifiedKm",
           "totalEarnings",
           "trips"
+        ]
+      },
+      "RecentTrip": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The tracking session this trip is. Opens into its route."
+          },
+          "campaignName": {
+            "type": "string",
+            "description": "The campaign whose livery the vehicle was carrying, which is what names the trip."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres only. Held distance is not counted here."
+          },
+          "earnings": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "campaignName",
+          "startedAt",
+          "endedAt",
+          "verifiedKm",
+          "earnings",
+          "status"
+        ]
+      },
+      "RecentTrips": {
+        "type": "object",
+        "properties": {
+          "trips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecentTrip"
+            },
+            "description": "Newest first."
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass back as `before` for the next page. Null at the end of the feed."
+          }
+        },
+        "required": [
+          "trips",
+          "nextBefore"
         ]
       },
       "DriverTripLeg": {
@@ -10484,6 +10839,177 @@
         }
       }
     },
+    "/v1/campaigns/{id}/impressions": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "What the campaign has been seen by",
+        "description": "The campaign's billable driving, expressed as an audience.\n\nGuarantee what you measure, report what you model. `verifiedKm` is GPS-provable and is the unit the contract is written in; `impressions` is the media translation of it and is explicitly a model output. Both are returned together so neither can be read without the other.\n\nThe audience is derived from the fleet measuring its own roads: how far below free-flow speed a vehicle was travelling gives the traffic density around it, and therefore the people in a position to see the livery. No traffic feed is licensed and none is needed — which is also why `baselineMix` can be published at all.\n\nScoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The campaign. Zero totals for one that has not been driven yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignImpressions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/impressions/days/{date}": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "One day, with the working shown",
+        "description": "What a row in the daily series opens into: the same totals for a single day, plus every coefficient the model multiplied to reach them and the two speeds the congestion was read from.\n\nPublished so the figure can be argued with. An impression count nobody can take apart is a number an advertiser has to take on trust, and trust is the thing the rest of this platform is built to avoid asking for.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "Civil day in Asia/Kolkata."
+            },
+            "required": true,
+            "description": "Civil day in Asia/Kolkata.",
+            "name": "date",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day. Zero totals for a day the campaign did not run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDayImpressions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/campaigns/{id}/vehicles": {
       "post": {
         "tags": [
@@ -11972,6 +12498,77 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DayDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/trips": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "My recent trips",
+        "description": "The driver's own trips across days, newest first — what the earnings history opens with rather than a list of dates.\n\nBoth this and the day-bucketed history are sums over the same segments, so they cannot disagree about a figure. They answer different questions: the history answers \"what did I earn on Tuesday\", and this answers \"what have I been doing\", which is what someone opening the app is usually looking for.\n\nA trip that earned nothing is included and carries its status. A refused shift is still a thing the driver did, and omitting it is how a driver comes to believe the app lost a morning.\n\nPaged on the trip's own start time rather than an offset, because the feed grows at the top while it is being read.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Cursor: return trips that started strictly before this instant."
+            },
+            "required": false,
+            "description": "Cursor: return trips that started strictly before this instant.",
+            "name": "before",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of trips.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecentTrips"
                 }
               }
             }
