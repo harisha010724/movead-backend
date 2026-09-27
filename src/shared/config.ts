@@ -232,6 +232,23 @@ const EnvSchema = z.object({
   GPS_MAX_BRIDGE_SECONDS: z.coerce.number().positive().default(120),
 
   /**
+   * How long a vehicle may stand still before the drive either side of the
+   * stop counts as two trips rather than one.
+   *
+   * Nothing about billing depends on this — the segments, the kilometres and
+   * the money are identical however they are grouped. It decides only what a
+   * driver is shown as one journey, and the cost of getting it wrong runs one
+   * way: too short and a level crossing splits a delivery run into halves that
+   * look like separate work.
+   *
+   * Necessarily longer than `GPS_MAX_BRIDGE_SECONDS`, which already stops any
+   * segment spanning a stop from existing; this only decides how far apart two
+   * segments must be before the stop between them was a destination rather
+   * than traffic.
+   */
+  TRIP_GAP_SECONDS: z.coerce.number().positive().default(600),
+
+  /**
    * AC-18: above this the trace is not describing a car in a city, so the
    * distance is held rather than paid. Generous on purpose — a flagged
    * kilometre costs a driver their earnings until somebody reviews it.
@@ -367,6 +384,7 @@ export const config = {
     rejectAccuracyM: env.GPS_ACCURACY_REJECT_M,
     maxBridgeSeconds: env.GPS_MAX_BRIDGE_SECONDS,
     maxPlausibleKmh: env.GPS_MAX_PLAUSIBLE_KMH,
+    tripGapSeconds: env.TRIP_GAP_SECONDS,
   },
 } as const;
 

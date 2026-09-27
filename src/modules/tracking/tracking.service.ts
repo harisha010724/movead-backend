@@ -519,7 +519,7 @@ export interface TripZoneTotal {
 }
 
 export interface TripView {
-  /** The tracking session. One press of Start to one press of Stop. */
+  /** The drive's first segment — see `drivesFrom` for why not an index. */
   id: string;
   /** Position within the day, counting from 1 — what the app labels the row. */
   sequence: number;
@@ -528,6 +528,11 @@ export interface TripView {
   verifiedKm: number;
   earnings: Money;
   status: TripStatus;
+  /**
+   * How long the vehicle stood still before this drive began, or null when it
+   * is the first of its shift and there was nothing to wait through.
+   */
+  idleSecondsBefore: number | null;
   /** Null when nothing on this trip was billable, so there is nothing to split. */
   zoneBreakdown: TripZoneTotal[] | null;
 }
@@ -545,6 +550,8 @@ export interface AuditDayView extends DayDetailView {
 }
 
 interface TripRow {
+  /** The drive's first segment, which is what names the trip. See `drivesFrom`. */
+  trip_id: string;
   session_id: string;
   started_at: Date;
   ended_at: Date;
@@ -552,10 +559,102 @@ interface TripRow {
   earnings: string;
   billable: string;
   pending: string;
+  /** Seconds the vehicle stood still since the previous drive of this shift. */
+  idle_seconds: number | null;
 }
 
+/**
+ * A trip is a drive, not a shift.
+ *
+ * It used to be a tracking session: one press of Start to one press of Stop.
+ * That is the unit the driver *operated*, but it is not the unit they
+ * remember — a shift with an hour's break in the middle of it arrived as a
+ * single row spanning both halves and the hour between, which answers none of
+ * "when did I finish the morning run" or "how long was I waiting".
+ *
+ * The evidence for the split is already in the table and costs nothing to
+ * read. A parked vehicle records no points, and `buildSegments` refuses to
+ * bridge a pair more than `maxBridgeSeconds` apart rather than draw a straight
+ * line through it (AC-20.8) — so no segment ever spans a stop, and the holes
+ * between runs of segments are exactly the stops. All this does is decide
+ * which holes were big enough to have been a destination.
+ *
+ * Nothing about money moves. The segments, their zones, their states and their
+ * rupees are untouched; only the grouping over them changes, so a day total
+ * cannot disagree with the trips that justify it however they are cut.
+ *
+ * Emits `anchored`: every in-scope segment carrying the `trip_id` of the drive
+ * it belongs to. The scope is interpolated and must never be anything but a
+ * literal from this module.
+ *
+ * `trip_id` is the drive's first segment rather than a synthesised index,
+ * because an index only means anything within the query that produced it: the
+ * day view filters to one civil day and would number a drive that began before
+ * midnight differently from the feed, which does not filter at all. A segment
+ * id survives both, and `driveOf` resolves it back without being told which
+ * list it came from.
+ *
+ * It is carried on every row rather than aggregated per group so that callers
+ * can filter by state *after* the split. Windowing over billable rows alone
+ * would let a long held stretch in the middle of a drive open a gap that is
+ * not there, and cut a journey the main list kept whole.
+ */
+function drivesFrom(scope: string): string {
+  return `
+    WITH marked AS (
+      SELECT s.*,
+             CASE
+               WHEN lag(s.ended_at) OVER w IS NULL THEN 1
+               WHEN s.started_at - lag(s.ended_at) OVER w
+                    > make_interval(secs => :tripGapSeconds) THEN 1
+               ELSE 0
+             END AS breaks
+        FROM trip_segments s
+       WHERE ${scope}
+      WINDOW w AS (PARTITION BY s.session_id ORDER BY s.started_at, s.part_index)
+    ),
+    numbered AS (
+      SELECT m.*,
+             SUM(m.breaks) OVER (PARTITION BY m.session_id
+                                 ORDER BY m.started_at, m.part_index
+                                 ROWS UNBOUNDED PRECEDING) AS drive
+        FROM marked m
+    ),
+    anchored AS (
+      SELECT n.*,
+             first_value(n.id) OVER (PARTITION BY n.session_id, n.drive
+                                     ORDER BY n.started_at, n.part_index) AS trip_id
+        FROM numbered n
+    )`;
+}
+
+/** The columns every trip list needs, one row per drive. */
+const DRIVE_COLUMNS = `
+  a.trip_id,
+  a.session_id,
+  min(a.started_at) AS started_at,
+  max(a.ended_at)   AS ended_at,
+  COALESCE(SUM(a.distance_km)    FILTER (WHERE a.state = 'BILLABLE'), 0) AS km,
+  COALESCE(SUM(a.driver_earning) FILTER (WHERE a.state = 'BILLABLE'), 0) AS earnings,
+  count(*) FILTER (WHERE a.state = 'BILLABLE')       AS billable,
+  count(*) FILTER (WHERE a.state = 'PENDING_REVIEW') AS pending`;
+
+/**
+ * How long the vehicle stood still before each drive.
+ *
+ * Partitioned by session on purpose: the gap between the last drive of one
+ * shift and the first of the next is not idle time, it is the driver being off
+ * duty, and presenting fourteen hours asleep as waiting would be absurd. The
+ * first drive of a shift therefore has no idle figure at all rather than a
+ * zero, which would read as "started instantly".
+ */
+const IDLE_SECONDS = `
+  EXTRACT(EPOCH FROM (
+    g.started_at - lag(g.ended_at) OVER (PARTITION BY g.session_id ORDER BY g.started_at)
+  ))::int AS idle_seconds`;
+
 interface ZoneRow {
-  session_id: string;
+  trip_id: string;
   zone: SegmentZone;
   km: string;
   earnings: string;
@@ -576,12 +675,13 @@ function dayScope(subject: 'driver_id' | 'vehicle_id'): string {
 /**
  * Every trip a driver made on one civil day, and what each one earned.
  *
- * A trip is a tracking session, because that is the unit the driver performed:
- * they pressed Start, drove, and pressed Stop. The segments underneath are a
- * pricing artefact — there are hundreds of them in an afternoon and none of
- * them is an event the driver would recognise.
+ * A trip is a drive: the ground covered between two stops, which is what a
+ * driver recognises as one journey. It is not the session — a driver who works
+ * all morning presses Start once — and it is not a segment either, of which
+ * there are hundreds in an afternoon and none is an event anyone would name.
+ * `drivesFrom` makes the cut; nothing about the money depends on it.
  *
- * A session that runs through midnight appears on both days, carrying only the
+ * A drive that runs through midnight appears on both days, carrying only the
  * segments driven on each, and its times are the first and last of those. The
  * alternative — filing the whole shift under the day it began — would make the
  * day total disagree with the money, which is bucketed by segment (AC-08.7).
@@ -615,51 +715,55 @@ async function dayOf(
   date: string,
 ): Promise<AuditDayView> {
   const scope = dayScope(subject);
-  const binds = { subject: id, date, zone: IST };
+  const binds = {
+    subject: id,
+    date,
+    zone: IST,
+    tripGapSeconds: config.tracking.tripGapSeconds,
+  };
 
   const [totals, trips, zones] = await Promise.all([
     totalsFor(scope, binds),
 
     sequelize.query<TripRow>(
-      `SELECT session_id,
-              min(started_at) AS started_at,
-              max(ended_at)   AS ended_at,
-              COALESCE(SUM(distance_km)    FILTER (WHERE state = 'BILLABLE'), 0) AS km,
-              COALESCE(SUM(driver_earning) FILTER (WHERE state = 'BILLABLE'), 0) AS earnings,
-              count(*) FILTER (WHERE state = 'BILLABLE')       AS billable,
-              count(*) FILTER (WHERE state = 'PENDING_REVIEW') AS pending
-         FROM trip_segments
-        WHERE ${scope}
-        GROUP BY session_id
-        ORDER BY min(started_at)`,
+      `${drivesFrom(scope)},
+       grouped AS (
+         SELECT ${DRIVE_COLUMNS}
+           FROM anchored a
+          GROUP BY a.trip_id, a.session_id
+       )
+       SELECT g.*, ${IDLE_SECONDS}
+         FROM grouped g
+        ORDER BY g.started_at`,
       { replacements: binds, type: QueryTypes.SELECT },
     ),
 
     // Only zones that actually earned: a row reading "Prime 0.0 km ₹0.00" is
     // not a breakdown, it is a distraction from the ones that paid.
     sequelize.query<ZoneRow>(
-      `SELECT session_id,
-              zone,
-              SUM(distance_km)    AS km,
-              SUM(driver_earning) AS earnings
-         FROM trip_segments
-        WHERE ${scope} AND state = 'BILLABLE'
-        GROUP BY session_id, zone
-        HAVING SUM(distance_km) > 0
-        ORDER BY SUM(distance_km) DESC`,
+      `${drivesFrom(scope)}
+       SELECT a.trip_id,
+              a.zone,
+              SUM(a.distance_km)    AS km,
+              SUM(a.driver_earning) AS earnings
+         FROM anchored a
+        WHERE a.state = 'BILLABLE'
+        GROUP BY a.trip_id, a.zone
+       HAVING SUM(a.distance_km) > 0
+        ORDER BY SUM(a.distance_km) DESC`,
       { replacements: binds, type: QueryTypes.SELECT },
     ),
   ]);
 
   const breakdowns = new Map<string, TripZoneTotal[]>();
   for (const row of zones) {
-    const forSession = breakdowns.get(row.session_id) ?? [];
-    forSession.push({
+    const forTrip = breakdowns.get(row.trip_id) ?? [];
+    forTrip.push({
       zone: row.zone.toLowerCase() as Zone,
       km: asKm(row.km),
       earnings: toPayable(money(row.earnings)),
     });
-    breakdowns.set(row.session_id, forSession);
+    breakdowns.set(row.trip_id, forTrip);
   }
 
   return {
@@ -668,14 +772,15 @@ async function dayOf(
     totalEarnings: toPayable(money(totals.earnings)),
     totalCharge: toLedger(money(totals.charge)),
     trips: trips.map((row, index) => ({
-      id: row.session_id,
+      id: row.trip_id,
       sequence: index + 1,
       startedAt: row.started_at.toISOString(),
       endedAt: row.ended_at.toISOString(),
       verifiedKm: asKm(row.km),
       earnings: toPayable(money(row.earnings)),
       status: statusOf(row),
-      zoneBreakdown: breakdowns.get(row.session_id) ?? null,
+      idleSecondsBefore: row.idle_seconds,
+      zoneBreakdown: breakdowns.get(row.trip_id) ?? null,
     })),
   };
 }
@@ -691,6 +796,11 @@ export interface RecentTripView {
   verifiedKm: number;
   earnings: Money;
   status: TripStatus;
+  /**
+   * How long the vehicle stood still before this drive began, or null when it
+   * is the first of its shift and there was nothing to wait through.
+   */
+  idleSecondsBefore: number | null;
 }
 
 export interface RecentTripsView {
@@ -732,33 +842,50 @@ export async function recentTrips(
   const limit = Math.min(Math.max(options.limit ?? 20, 1), MAX_TRIP_PAGE);
   const before = options.before ?? null;
 
+  /*
+   * The idle figure is computed before the page is cut, not after.
+   *
+   * It is the gap to the drive before this one, and at a page boundary that
+   * drive is on the next page — so filtering first would leave the top row of
+   * every page but the first claiming it had no wait, purely because of where
+   * the page happened to end.
+   */
   const rows = await sequelize.query<RecentTripRow>(
-    `SELECT s.session_id,
-            c.name AS campaign_name,
-            min(s.started_at) AS started_at,
-            max(s.ended_at)   AS ended_at,
-            COALESCE(SUM(s.distance_km)    FILTER (WHERE s.state = 'BILLABLE'), 0) AS km,
-            COALESCE(SUM(s.driver_earning) FILTER (WHERE s.state = 'BILLABLE'), 0) AS earnings,
-            count(*) FILTER (WHERE s.state = 'BILLABLE')       AS billable,
-            count(*) FILTER (WHERE s.state = 'PENDING_REVIEW') AS pending
-       FROM trip_segments s
-       JOIN campaigns c ON c.id = s.campaign_id
-      WHERE s.driver_id = :driverId
-      GROUP BY s.session_id, c.name
-     HAVING :before::timestamptz IS NULL OR min(s.started_at) < :before::timestamptz
-      ORDER BY min(s.started_at) DESC
+    `${drivesFrom('s.driver_id = :driverId')},
+     grouped AS (
+       SELECT ${DRIVE_COLUMNS}, a.campaign_id
+         FROM anchored a
+        GROUP BY a.trip_id, a.session_id, a.campaign_id
+     ),
+     paged AS (
+       SELECT g.*, c.name AS campaign_name, ${IDLE_SECONDS}
+         FROM grouped g
+         JOIN campaigns c ON c.id = g.campaign_id
+     )
+     SELECT * FROM paged
+      WHERE :before::timestamptz IS NULL OR started_at < :before::timestamptz
+      ORDER BY started_at DESC
       LIMIT :limit`,
-    { replacements: { driverId, before, limit }, type: QueryTypes.SELECT },
+    {
+      replacements: {
+        driverId,
+        before,
+        limit,
+        tripGapSeconds: config.tracking.tripGapSeconds,
+      },
+      type: QueryTypes.SELECT,
+    },
   );
 
   const trips = rows.map((row) => ({
-    id: row.session_id,
+    id: row.trip_id,
     campaignName: row.campaign_name,
     startedAt: row.started_at.toISOString(),
     endedAt: row.ended_at.toISOString(),
     verifiedKm: asKm(row.km),
     earnings: toPayable(money(row.earnings)),
     status: statusOf(row),
+    idleSecondsBefore: row.idle_seconds,
   }));
 
   // Only when the page was filled. A short page is the end of the feed, and
@@ -812,6 +939,7 @@ export interface TripDetailView {
 }
 
 interface SegmentRow {
+  id: string;
   zone: SegmentZone;
   state: SegmentState;
   flag_reason: string | null;
@@ -839,37 +967,68 @@ interface SegmentRow {
  * segments agreeing on zone, state and reason are the same fact about the
  * journey, so they are merged and counted.
  */
-export async function tripDetail(sessionId: string): Promise<TripDetailView> {
-  const session = await TrackingSession.findByPk(sessionId);
-  if (!session) throw new NotFoundError('Trip');
+export async function tripDetail(tripId: string): Promise<TripDetailView> {
+  const anchor = await TripSegment.findByPk(tripId);
+  if (!anchor) throw new NotFoundError('Trip');
 
   const [campaign, vehicle, driver, rows] = await Promise.all([
-    Campaign.findByPk(session.campaignId),
-    Vehicle.findByPk(session.vehicleId),
-    Driver.findByPk(session.driverId),
-    segmentsOf(sessionId),
+    Campaign.findByPk(anchor.campaignId),
+    Vehicle.findByPk(anchor.vehicleId),
+    Driver.findByPk(anchor.driverId),
+    segmentsOf(anchor.sessionId),
   ]);
 
-  const totals = await totalsFor('session_id = :sessionId', { sessionId });
+  const drive = driveOf(rows, tripId);
+  if (!drive) throw new NotFoundError('Trip');
+
+  const totals = totalsOf(drive);
 
   return {
-    id: session.id,
+    id: totals.id,
     vehicleRegistration: vehicle?.registrationNumber ?? '',
     campaignName: campaign?.name ?? '',
     driverName: driver?.name ?? '',
-    startedAt: session.startedAt.toISOString(),
-    endedAt: session.endedAt?.toISOString() ?? null,
-    distanceKm: asKm(totals.billableKm),
-    advertiserCharge: toLedger(money(totals.charge)),
-    driverEarning: toPayable(money(totals.earnings)),
-    legs: intoLegs(rows),
+    startedAt: totals.startedAt,
+    endedAt: totals.endedAt,
+    distanceKm: totals.verifiedKm,
+    advertiserCharge: toLedger(sum(totals.billable.map((row) => row.advertiser_charge))),
+    driverEarning: totals.earnings,
+    legs: intoLegs(drive),
+  };
+}
+
+/**
+ * One drive's own figures, summed over its segments rather than its session.
+ *
+ * The list queries do this in Postgres, deliberately, so a day total cannot
+ * drift from the rows under it. There is no such invariant to protect here —
+ * a detail answers only for itself — and `toLeg` already sums the same columns
+ * the same way a few lines below, so doing it twice over would be the drift.
+ */
+function totalsOf(drive: SegmentRow[]) {
+  // Non-null: `driveOf` never returns an empty drive.
+  const first = drive[0] as SegmentRow;
+  const last = drive.at(-1) as SegmentRow;
+  const billable = drive.filter((row) => row.state === 'BILLABLE');
+
+  return {
+    id: first.id,
+    startedAt: first.started_at.toISOString(),
+    endedAt: last.ended_at.toISOString(),
+    billable,
+    verifiedKm: asKm(toLedger(sum(billable.map((row) => row.distance_km)))),
+    earnings: toPayable(sum(billable.map((row) => row.driver_earning))),
+    status: statusOf({
+      billable: String(billable.length),
+      pending: String(drive.filter((row) => row.state === 'PENDING_REVIEW').length),
+    }),
   };
 }
 
 /** Every priced part of one session, in the order it was driven. */
 function segmentsOf(sessionId: string): Promise<SegmentRow[]> {
   return sequelize.query<SegmentRow>(
-    `SELECT s.zone, s.state, s.flag_reason, s.started_at, s.ended_at, s.distance_km,
+    `SELECT s.id, s.zone, s.state, s.flag_reason, s.started_at, s.ended_at, s.distance_km,
             s.advertiser_rate, s.driver_rate, s.advertiser_charge, s.driver_earning,
             s.from_point_id,
             f.lat AS from_lat, f.lon AS from_lon,
@@ -886,6 +1045,36 @@ function segmentsOf(sessionId: string): Promise<SegmentRow[]> {
 interface PlacedSegment extends SegmentRow {
   from: LatLng;
   to: LatLng;
+}
+
+/**
+ * The one drive a trip id names, out of the shift it was part of.
+ *
+ * The same cut `drivesFrom` makes in SQL, made again here over a session's
+ * segments, because a trip id has to resolve to the same drive whichever list
+ * it was tapped in — and the day list cuts its rows at midnight while the feed
+ * does not. Resolving over the whole session rather than the list's slice is
+ * what makes the two agree, and it matches what a session detail has always
+ * done: the list shows the day's portion, the detail shows the drive.
+ *
+ * Returns null when the id is not a segment of this session, which is the same
+ * answer as "no such trip".
+ */
+function driveOf(rows: SegmentRow[], tripId: string): SegmentRow[] | null {
+  const gapMs = config.tracking.tripGapSeconds * 1000;
+  const drives: SegmentRow[][] = [];
+
+  for (const segment of rows) {
+    const current = drives.at(-1);
+    const previous = current?.at(-1);
+    const parked =
+      previous && segment.started_at.getTime() - previous.ended_at.getTime() > gapMs;
+
+    if (!current || parked) drives.push([segment]);
+    else current.push(segment);
+  }
+
+  return drives.find((drive) => drive.some((segment) => segment.id === tripId)) ?? null;
 }
 
 /**
@@ -1016,33 +1205,32 @@ export interface DriverTripView {
  * who can see 26 km on the map and 24 km on the total is owed the two
  * kilometres in between, and where they were.
  */
-export async function driverTrip(driverId: string, sessionId: string): Promise<DriverTripView> {
-  const session = await TrackingSession.findByPk(sessionId);
+export async function driverTrip(driverId: string, tripId: string): Promise<DriverTripView> {
+  const anchor = await TripSegment.findByPk(tripId);
 
   // One answer for "no such trip" and "not yours". Telling the two apart would
-  // let any driver test whether a session id exists.
-  if (!session || session.driverId !== driverId) throw new NotFoundError('Trip');
+  // let any driver test whether a trip id exists.
+  if (!anchor || anchor.driverId !== driverId) throw new NotFoundError('Trip');
 
-  const [campaign, rows, totals] = await Promise.all([
-    Campaign.findByPk(session.campaignId),
-    segmentsOf(sessionId),
-    totalsFor('session_id = :sessionId', { sessionId }),
+  const [campaign, rows] = await Promise.all([
+    Campaign.findByPk(anchor.campaignId),
+    segmentsOf(anchor.sessionId),
   ]);
 
-  const counts = {
-    billable: String(rows.filter((row) => row.state === 'BILLABLE').length),
-    pending: String(rows.filter((row) => row.state === 'PENDING_REVIEW').length),
-  };
+  const drive = driveOf(rows, tripId);
+  if (!drive) throw new NotFoundError('Trip');
+
+  const totals = totalsOf(drive);
 
   return {
-    id: session.id,
+    id: totals.id,
     campaignName: campaign?.name ?? '',
-    startedAt: session.startedAt.toISOString(),
-    endedAt: session.endedAt?.toISOString() ?? null,
-    verifiedKm: asKm(totals.billableKm),
-    earnings: toPayable(money(totals.earnings)),
-    status: statusOf(counts),
-    legs: intoLegs(rows).map((leg) => ({
+    startedAt: totals.startedAt,
+    endedAt: totals.endedAt,
+    verifiedKm: totals.verifiedKm,
+    earnings: totals.earnings,
+    status: totals.status,
+    legs: intoLegs(drive).map((leg) => ({
       zone: leg.zone,
       state: leg.state,
       flagReason: leg.flagReason,

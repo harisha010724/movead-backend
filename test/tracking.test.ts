@@ -617,7 +617,7 @@ describe('stopping (AC-08)', () => {
  * landing on the day it was driven rather than the day UTC filed it under.
  */
 describe('a day of trips', () => {
-  it('groups the day into one trip per session, earliest first', async () => {
+  it('groups the day into one trip per drive, earliest first', async () => {
     const { driver, sessionId } = await runningSession();
     await upload(driver, sessionId, straightRun());
     await driver.delete('/v1/driver/tracking/session').send({}).expect(200);
@@ -630,7 +630,7 @@ describe('a day of trips', () => {
 
     expect(day.trips).toHaveLength(2);
     expect(day.trips.map((trip) => trip.sequence)).toEqual([1, 2]);
-    expect(first?.id).toBe(sessionId);
+    expect(first?.id).toBe(await tripIdOf(sessionId));
     expect(new Date(String(first?.startedAt)).getTime()).toBeLessThan(
       new Date(String(next?.startedAt)).getTime(),
     );
@@ -761,7 +761,7 @@ describe('a day of trips', () => {
     const mine = await dayOf(second.driver, await istToday());
 
     expect(mine.trips).toHaveLength(1);
-    expect(mine.trips[0]?.id).toBe(second.sessionId);
+    expect(mine.trips[0]?.id).toBe(await tripIdOf(second.sessionId));
   });
 
   it('refuses a caller with no session at all', async () => {
@@ -818,7 +818,7 @@ describe('auditing a vehicle by its plate', () => {
 
     expect(day.vehicle.registrationNumber).toBe(PLATE);
     expect(day.trips).toHaveLength(1);
-    expect(day.trips[0]?.id).toBe(sessionId);
+    expect(day.trips[0]?.id).toBe(await tripIdOf(sessionId));
   });
 
   /*
@@ -868,7 +868,7 @@ describe('auditing a vehicle by its plate', () => {
     const day = await auditDay(PLATES[OTHER_DRIVER.email] ?? '', await istToday());
 
     expect(day.trips).toHaveLength(1);
-    expect(day.trips[0]?.id).toBe(second.sessionId);
+    expect(day.trips[0]?.id).toBe(await tripIdOf(second.sessionId));
   });
 
   it('answers a day the vehicle did not work with an empty day', async () => {
@@ -967,7 +967,7 @@ describe('opening up one trip', () => {
     const { driver, sessionId } = await runningSession();
     await upload(driver, sessionId, straightRun());
 
-    const trip = await auditTrip(sessionId);
+    const trip = await auditTrip(await tripIdOf(sessionId));
     const [only] = trip.legs;
 
     expect(trip.legs).toHaveLength(1);
@@ -989,7 +989,7 @@ describe('opening up one trip', () => {
       fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
     ]);
 
-    const trip = await auditTrip(sessionId);
+    const trip = await auditTrip(await tripIdOf(sessionId));
     const held = trip.legs.filter((leg) => leg.state === 'PENDING_REVIEW');
 
     expect(trip.legs.length).toBeGreaterThan(1);
@@ -1023,10 +1023,8 @@ describe('the driver looking at their own trip (AC-24)', () => {
     const { driver, sessionId } = await runningSession();
     await upload(driver, sessionId, crossCity());
 
-    const [mine, audited] = await Promise.all([
-      ownTrip(driver, sessionId),
-      auditTrip(sessionId),
-    ]);
+    const tripId = await tripIdOf(sessionId);
+    const [mine, audited] = await Promise.all([ownTrip(driver, tripId), auditTrip(tripId)]);
 
     expect(mine.legs.map((leg) => leg.zone)).toEqual(['prime', 'network', 'secondary']);
     expect(mine.legs.map((leg) => leg.path)).toEqual(audited.legs.map((leg) => leg.path));
@@ -1042,7 +1040,7 @@ describe('the driver looking at their own trip (AC-24)', () => {
     const { driver, sessionId } = await runningSession();
     await upload(driver, sessionId, crossCity());
 
-    const trip = await ownTrip(driver, sessionId);
+    const trip = await ownTrip(driver, await tripIdOf(sessionId));
     const leaked = Object.keys(trip.legs[0] ?? {}).filter((key) =>
       key.toLowerCase().includes('advertiser'),
     );
@@ -1055,9 +1053,11 @@ describe('the driver looking at their own trip (AC-24)', () => {
     const { driver, sessionId } = await runningSession();
     await upload(driver, sessionId, straightRun());
 
+    // Opened by the id the list handed out, not by one the test worked out for
+    // itself — the round trip is half of what is being asserted.
     const day = await dayOf(driver, await istToday());
-    const listed = day.trips.find((trip) => trip.id === sessionId);
-    const opened = await ownTrip(driver, sessionId);
+    const [listed] = day.trips;
+    const opened = await ownTrip(driver, String(listed?.id));
 
     expect(opened.verifiedKm).toBe(listed?.verifiedKm);
     expect(opened.earnings).toBe(listed?.earnings);
@@ -1078,7 +1078,7 @@ describe('the driver looking at their own trip (AC-24)', () => {
       fix({ lat: 12.976, seconds: 90, accuracyM: 65 }),
     ]);
 
-    const trip = await ownTrip(driver, sessionId);
+    const trip = await ownTrip(driver, await tripIdOf(sessionId));
     const held = trip.legs.filter((leg) => leg.state === 'PENDING_REVIEW');
 
     expect(held.length).toBeGreaterThan(0);
@@ -1138,7 +1138,7 @@ describe('the trip feed behind the earnings history', () => {
     const { trips } = await feed(driver);
 
     expect(trips).toHaveLength(1);
-    expect(trips[0]?.id).toBe(sessionId);
+    expect(trips[0]?.id).toBe(await tripIdOf(sessionId));
     expect(trips[0]?.campaignName).toBe(CAMPAIGN.name);
   });
 
@@ -1161,8 +1161,8 @@ describe('the trip feed behind the earnings history', () => {
     await upload(driver, sessionId, crossCity());
 
     const day = await dayOf(driver, await istToday());
-    const listed = day.trips.find((trip) => trip.id === sessionId);
-    const fed = (await feed(driver)).trips.find((trip) => trip.id === sessionId);
+    const [listed] = day.trips;
+    const fed = (await feed(driver)).trips.find((trip) => trip.id === listed?.id);
 
     expect(fed?.verifiedKm).toBe(listed?.verifiedKm);
     expect(fed?.earnings).toBe(listed?.earnings);
@@ -1180,7 +1180,7 @@ describe('the trip feed behind the earnings history', () => {
 
     const { trips } = await feed(driver);
 
-    expect(trips.map((trip) => trip.id)).toContain(sessionId);
+    expect(trips.map((trip) => trip.id)).toContain(await tripIdOf(sessionId));
     expect(trips[0]?.status).toBe('pending_review');
     expect(trips[0]?.verifiedKm).toBe(0);
     expect(Number(trips[0]?.earnings)).toBe(0);
@@ -1230,6 +1230,133 @@ describe('the trip feed behind the earnings history', () => {
 
   it('is closed to a caller who is not signed in', async () => {
     await client().get('/v1/driver/trips').expect(401);
+  });
+});
+
+/**
+ * Where one journey ends and the next begins.
+ *
+ * A session is a shift — one press of Start to one press of Stop — and a
+ * driver who works all morning presses neither in between. What they recognise
+ * as a trip is a drive, so the lists cut a shift at the stops in it.
+ *
+ * The cut is presentational and these tests hold it to that: the same shift,
+ * grouped either way, owes the same money.
+ */
+describe('a shift split into the drives it was made of', () => {
+  it('shows a stop in the middle of a shift as two trips', async () => {
+    const { driver, sessionId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+
+    const { trips } = await feed(driver);
+
+    expect(trips).toHaveLength(2);
+    expect(trips.map((trip) => trip.campaignName)).toEqual([CAMPAIGN.name, CAMPAIGN.name]);
+    expect(trips.every((trip) => trip.verifiedKm > 0)).toBe(true);
+  });
+
+  it('leaves a shift driven without stopping as one trip', async () => {
+    const { driver, sessionId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const { trips } = await feed(driver);
+
+    expect(trips).toHaveLength(1);
+  });
+
+  /*
+   * The reason the split is safe to make at all. Grouping decides what the
+   * driver reads as one journey and nothing else, so a shift shown as two
+   * trips must still pay exactly what the day it belongs to pays.
+   */
+  it('pays the same whether the shift is read as one trip or two', async () => {
+    const { driver, sessionId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+
+    const day = await dayOf(driver, await istToday());
+    const km = day.trips.reduce((total, trip) => total + trip.verifiedKm, 0);
+    const earned = day.trips.reduce((total, trip) => total + Number(trip.earnings), 0);
+
+    expect(day.trips).toHaveLength(2);
+
+    /*
+     * The money to the paisa; the distance to within the rounding of the rows
+     * it was added up from. Kilometres are shown to one decimal, so two rows
+     * of 0.83 read as 0.8 each and sum to 0.1 short of the 1.7 above them.
+     * That is the display rounding the day list has always done, and it is
+     * exactly why the split is allowed to be presentational: it moves no
+     * money, and the money is what is asserted exactly.
+     */
+    expect(earned).toBeCloseTo(Number(day.totalEarnings), 2);
+    expect(Math.abs(km - day.totalVerifiedKm)).toBeLessThanOrEqual(0.05 * day.trips.length);
+  });
+
+  /*
+   * The figure the driver actually asked for: how long they sat between two
+   * jobs. It is the wait before the drive, so it belongs to the drive that
+   * ended it — a row saying "idle 28 min" above a trip answers "what was I
+   * doing before this?" without the reader having to subtract two timestamps.
+   */
+  it('reports the wait before a drive as the idle time of that drive', async () => {
+    const { driver, sessionId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+
+    const day = await dayOf(driver, await istToday());
+    const [first, second] = day.trips;
+
+    // 1800 seconds between the two runs, less the 90 the first one took.
+    expect(second?.idleSecondsBefore).toBe(PARKED_SECONDS - 90);
+    expect(first?.idleSecondsBefore).toBeNull();
+  });
+
+  /*
+   * Off duty is not idle. The gap between yesterday's last drive and this
+   * morning's first is the driver's own time, and reporting it as fourteen
+   * hours of waiting would say something untrue about the shift.
+   */
+  it('does not count the time between shifts as idle', async () => {
+    const { driver } = await runningSession();
+    await twoTrips(driver);
+
+    const { trips } = await feed(driver);
+
+    expect(trips).toHaveLength(2);
+    expect(trips.every((trip) => trip.idleSecondsBefore === null)).toBe(true);
+  });
+
+  /*
+   * A trip id has to open a trip. The lists name a drive by its first segment
+   * and the detail endpoints take the same id, so the one the driver tapped
+   * must come back describing that drive and not the shift around it.
+   */
+  it('opens one drive of a shift, not the whole shift', async () => {
+    const { driver, sessionId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+
+    const { trips } = await feed(driver);
+    const [newer, older] = trips;
+    const opened = await ownTrip(driver, String(newer?.id));
+
+    expect(opened.id).toBe(newer?.id);
+    expect(opened.verifiedKm).toBe(newer?.verifiedKm);
+    expect(opened.earnings).toBe(newer?.earnings);
+
+    // And it is genuinely one of the two, not the pair added up.
+    expect(opened.verifiedKm).toBeLessThan(
+      Number(newer?.verifiedKm) + Number(older?.verifiedKm),
+    );
+  });
+
+  it('shows an operator the same two drives the driver sees', async () => {
+    const { driver, sessionId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+
+    const day = await auditDay(PLATE, await istToday());
+    const audited = await auditTrip(String(day.trips[0]?.id));
+
+    expect(day.trips).toHaveLength(2);
+    expect(audited.id).toBe(day.trips[0]?.id);
+    expect(audited.distanceKm).toBe(day.trips[0]?.verifiedKm);
   });
 });
 
@@ -1552,6 +1679,7 @@ interface DayBody {
     verifiedKm: number;
     earnings: string;
     status: string;
+    idleSecondsBefore: number | null;
     zoneBreakdown: { zone: string; km: number; earnings: string }[] | null;
   }[];
 }
@@ -1608,8 +1736,8 @@ async function auditDay(vehicleNumber: string, date: string): Promise<AuditDayBo
   return response.body as AuditDayBody;
 }
 
-async function auditTrip(sessionId: string): Promise<TripDetailBody> {
-  const response = await admin.get(`/v1/admin/gps-audit/trips/${sessionId}`).expect(200);
+async function auditTrip(tripId: string): Promise<TripDetailBody> {
+  const response = await admin.get(`/v1/admin/gps-audit/trips/${tripId}`).expect(200);
   return response.body as TripDetailBody;
 }
 
@@ -1629,8 +1757,8 @@ interface DriverTripBody {
   }[];
 }
 
-async function ownTrip(driver: Agent, sessionId: string): Promise<DriverTripBody> {
-  const response = await driver.get(`/v1/driver/trips/${sessionId}`).expect(200);
+async function ownTrip(driver: Agent, tripId: string): Promise<DriverTripBody> {
+  const response = await driver.get(`/v1/driver/trips/${tripId}`).expect(200);
   return response.body as DriverTripBody;
 }
 
@@ -1643,6 +1771,7 @@ interface TripFeedBody {
     verifiedKm: number;
     earnings: string;
     status: string;
+    idleSecondsBefore: number | null;
   }[];
   nextBefore: string | null;
 }
@@ -1673,7 +1802,25 @@ async function twoTrips(driver: Agent): Promise<[string, string]> {
   const newer = await nextSession(driver);
   await upload(driver, newer, straightRun(600));
 
-  return [older, newer];
+  return [await tripIdOf(older), await tripIdOf(newer)];
+}
+
+/**
+ * The id the lists give a session's one drive — the drive's first segment.
+ *
+ * Every run uploaded in this file is continuous, so a session holds exactly
+ * one drive. Resolving the id this way keeps a test that means "now open the
+ * trip I just recorded" from having to read a list first to find out what it
+ * was called.
+ */
+async function tripIdOf(sessionId: string): Promise<string> {
+  const found = await row<{ id: string }>(
+    `SELECT id FROM trip_segments
+      WHERE session_id = '${sessionId}'
+      ORDER BY started_at, part_index
+      LIMIT 1`,
+  );
+  return found.id;
 }
 
 /** Closes whatever session is open and starts the next one. */
@@ -1687,7 +1834,7 @@ async function nextSession(driver: Agent): Promise<string> {
 async function drivenAcrossTheCity(): Promise<TripDetailBody> {
   const { driver, sessionId } = await runningSession();
   await upload(driver, sessionId, crossCity());
-  return auditTrip(sessionId);
+  return auditTrip(await tripIdOf(sessionId));
 }
 
 /**
@@ -1757,6 +1904,32 @@ function underReview() {
   return [12.9715, 12.974, 12.9765, 12.979].map((lat, index) =>
     fix({ lat, seconds: index * 30, accuracyM: 65 }),
   );
+}
+
+/**
+ * How long the vehicle stands still in `shiftWithAStop`.
+ *
+ * Comfortably past both thresholds it has to clear: `GPS_MAX_BRIDGE_SECONDS`,
+ * so no segment spans the stop, and `TRIP_GAP_SECONDS`, so the drives either
+ * side are counted separately. Picked as a delivery wait rather than as a
+ * number just over the line, so raising either default does not fail a test
+ * that was never about the boundary.
+ */
+const PARKED_SECONDS = 1800;
+
+/**
+ * One shift with a half-hour stop in the middle of it (AC-08.5).
+ *
+ * Two drives uploaded under one session id, which is the case the lists have
+ * to tell apart on the gap alone: the driver never pressed Stop, so nothing
+ * but the silence says the first journey ended.
+ */
+async function shiftWithAStop(driver: Agent, sessionId: string) {
+  const from = new Date(Date.now() - 60 * 60 * 1000);
+  return upload(driver, sessionId, [
+    ...straightRun(0, from),
+    ...straightRun(PARKED_SECONDS, from),
+  ]);
 }
 
 /** Four fixes climbing through the Prime box: about 0.8 km, all billable. */
