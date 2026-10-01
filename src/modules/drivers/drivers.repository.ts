@@ -1,6 +1,7 @@
 import { Op, QueryTypes, Transaction } from 'sequelize';
 
 import { sequelize } from '../../db/sequelize';
+import { asIsoDate, campaignDateHasLapsed } from '../../shared/time';
 import { Campaign } from '../campaigns/campaigns.model';
 import { CampaignVehicle, LIVE_ASSIGNMENT } from '../installations/installations.model';
 
@@ -137,6 +138,10 @@ export function vehiclesWithBaseLocation(
  * end date. A buyer told only "Booked" has to ring someone to learn when that
  * stops being true; the date lets them plan the next flight themselves.
  *
+ * The last campaign day is inclusive. After that Indian date the flight is
+ * over even if nobody has pressed Complete, so a live assignment on a lapsed
+ * campaign does not keep the vehicle booked.
+ *
  * One query for the whole list. Asking per row is the N+1 that makes the
  * picker slow exactly when a zone is busy, which is when it is most looked at.
  *
@@ -150,13 +155,19 @@ export async function bookedUntilFor(vehicleIds: string[]): Promise<Map<string, 
   const rows = await CampaignVehicle.findAll({
     attributes: ['vehicleId'],
     where: { vehicleId: { [Op.in]: vehicleIds }, status: { [Op.in]: LIVE_ASSIGNMENT } },
-    include: [{ model: Campaign, as: 'campaign', required: true, attributes: ['endDate'] }],
+    include: [
+      { model: Campaign, as: 'campaign', required: true, attributes: ['endDate', 'status'] },
+    ],
   });
+
+  const FINISHED = new Set(['COMPLETED', 'STOPPED', 'CANCELLED']);
 
   const byVehicle = new Map<string, string>();
   for (const row of rows) {
-    const endDate = row.campaign?.endDate;
-    if (!endDate) continue;
+    const campaign = row.campaign;
+    const endDate = campaign?.endDate ? asIsoDate(campaign.endDate) : '';
+    if (!endDate || campaignDateHasLapsed(endDate)) continue;
+    if (campaign?.status && FINISHED.has(campaign.status)) continue;
     const known = byVehicle.get(row.vehicleId);
     if (!known || endDate > known) byVehicle.set(row.vehicleId, endDate);
   }

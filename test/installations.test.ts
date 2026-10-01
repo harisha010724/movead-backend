@@ -925,6 +925,21 @@ describe('when a booked vehicle comes free', () => {
    * left behind on the row would have a buyer waiting for a day that no longer
    * means anything.
    */
+  it('reads as available once the last campaign day has passed', async () => {
+    const { campaignId } = await assignedVehicleWithDriver();
+    await Campaign.update(
+      { startDate: '2026-08-01', endDate: '2026-08-31' },
+      { where: { id: campaignId } },
+    );
+
+    const advertiser = await advertiserPortal();
+    const listed = await advertiser.post('/v1/campaigns/available-vehicles').send(ZONES).expect(200);
+
+    expect(listed.body.items[0].availability).toBe('available');
+    expect(listed.body.items[0].bookedUntil).toBeUndefined();
+    expect(listed.body.availableCount).toBe(1);
+  });
+
   it('drops the date once the vehicle is unassigned', async () => {
     const { assignmentId } = await assignedVehicleWithDriver();
     await admin

@@ -22,11 +22,29 @@ export function todayIst(at: Date = new Date()): string {
 }
 
 /**
+ * A campaign date as `YYYY-MM-DD`.
+ *
+ * Sequelize DATEONLY is a string in tests and sometimes a Date on the Azure
+ * host. `String(date).slice(0, 10)` then becomes `"Wed Sep 30"`, which is not
+ * a day, and `campaignDateHasLapsed` compares it as text and loses.
+ */
+export function asIsoDate(value: string | Date): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return raw.slice(0, 10);
+}
+
+/**
  * The last campaign day is inclusive. After that Indian date the flight is
  * over, even if nobody has pressed Complete yet.
  */
-export function campaignDateHasLapsed(endDate: string, at: Date = new Date()): boolean {
-  return todayIst(at) > String(endDate).slice(0, 10);
+export function campaignDateHasLapsed(endDate: string | Date, at: Date = new Date()): boolean {
+  return todayIst(at) > asIsoDate(endDate);
 }
 
 /**
