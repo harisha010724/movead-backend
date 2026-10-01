@@ -9,8 +9,14 @@ import {
   CreativeKeyParamSchema,
   EstimateCampaignRequestSchema,
 } from '../../contracts/campaigns';
+import {
+  CampaignRosterQuerySchema,
+  CampaignTripParamSchema,
+  CampaignTripQuerySchema,
+} from '../../contracts/tracking';
 import { IdParamSchema } from '../../contracts/common';
 import * as drivers from '../drivers/drivers.service';
+import * as tracking from '../tracking/tracking.service';
 import { BadRequestError, ForbiddenError } from '../../shared/errors';
 import { currentUser } from '../../shared/http/middleware/auth';
 import { parseBody, parseParams, parseQuery } from '../../shared/http/validate';
@@ -66,6 +72,48 @@ export async function create(req: Request, res: Response): Promise<void> {
 export async function get(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
   res.json(await campaigns.getForAdvertiser(advertiserIdOf(req), id));
+}
+
+/**
+ * The drives recorded while carrying this campaign.
+ *
+ * Resolved through `getForAdvertiser` first, so a campaign belonging to
+ * another advertiser is not found rather than forbidden — the same answer
+ * impressions gives, and the same reason: ownership is a lookup, not a gate.
+ */
+export async function listDrivers(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  const query = parseQuery(req, CampaignRosterQuerySchema);
+  const campaign = await campaigns.getForAdvertiser(advertiserIdOf(req), id);
+  res.json(
+    await tracking.campaignRoster(campaign.id, {
+      q: query.q ?? null,
+      limit: query.limit,
+      offset: query.offset,
+    }),
+  );
+}
+
+export async function listTrips(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  const query = parseQuery(req, CampaignTripQuerySchema);
+  const campaign = await campaigns.getForAdvertiser(advertiserIdOf(req), id);
+  res.json(
+    await tracking.campaignTrips(campaign.id, {
+      driverId: query.driverId ?? null,
+      q: query.q ?? null,
+      status: query.status ?? null,
+      before: query.before ?? null,
+      limit: query.limit,
+      offset: query.offset,
+    }),
+  );
+}
+
+export async function getTrip(req: Request, res: Response): Promise<void> {
+  const { id, tripId } = parseParams(req, CampaignTripParamSchema);
+  const campaign = await campaigns.getForAdvertiser(advertiserIdOf(req), id);
+  res.json(await tracking.campaignTrip(campaign.id, tripId));
 }
 
 export async function update(req: Request, res: Response): Promise<void> {

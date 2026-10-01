@@ -5,6 +5,7 @@ import { BadRequestError } from '../../shared/errors';
 import { requireAuth, requirePermission } from '../../shared/http/middleware/auth';
 
 import * as impressions from '../impressions/impressions.controller';
+import * as visibility from '../visibility/visibility.controller';
 
 import * as controller from './campaigns.controller';
 import './campaigns.model';
@@ -85,6 +86,18 @@ export function campaignRoutes(): Router {
     '/:id/impressions/days/:date',
     requirePermission('advertiser.campaign.read'),
     impressions.forDay,
+  );
+  router.get(
+    '/:id/visibility',
+    requirePermission('advertiser.campaign.read'),
+    visibility.forCampaign,
+  );
+  router.get('/:id/drivers', requirePermission('advertiser.campaign.read'), controller.listDrivers);
+  router.get('/:id/trips', requirePermission('advertiser.campaign.read'), controller.listTrips);
+  router.get(
+    '/:id/trips/:tripId',
+    requirePermission('advertiser.campaign.read'),
+    controller.getTrip,
   );
 
   return router;

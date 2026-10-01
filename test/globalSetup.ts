@@ -40,12 +40,15 @@ async function prepareDatabase(url: string): Promise<boolean> {
     await admin.end();
   }
 
-  await run('npx', ['sequelize-cli', 'db:migrate'], {
-    // `DATABASE_SSL` as well as the URL: `src/db/config.js` reads both through
-    // dotenv, and the development file's value belongs to a different server.
-    env: { ...process.env, DATABASE_URL: url, DATABASE_SSL: String(ssl) },
-    shell: process.platform === 'win32',
-  });
+  await run(
+    process.execPath,
+    ['./node_modules/sequelize-cli/lib/sequelize', 'db:migrate'],
+    {
+      // `DATABASE_SSL` as well as the URL: `src/db/config.js` reads both through
+      // dotenv, and the development file's value belongs to a different server.
+      env: { ...process.env, DATABASE_URL: url, DATABASE_SSL: String(ssl) },
+    },
+  );
 
   return true;
 }

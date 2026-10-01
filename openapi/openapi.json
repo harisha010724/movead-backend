@@ -73,6 +73,10 @@
       "description": "In-app inbox for the advertiser — campaign approval and rejection"
     },
     {
+      "name": "reports",
+      "description": "Advertiser exports: a dated campaign proof pack and the CSV extracts behind the same billed kilometres."
+    },
+    {
       "name": "vehicles",
       "description": "Advertiser fleet browse — onboarded vehicles and their operating pins"
     },
@@ -4637,6 +4641,16 @@
           "achievedKm": {
             "type": "number"
           },
+          "earned": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "What the verified kilometres on this campaign actually paid the driver."
+              }
+            ]
+          },
           "terms": {
             "type": "array",
             "items": {
@@ -4733,6 +4747,7 @@
           "totalDays",
           "daysLeft",
           "achievedKm",
+          "earned",
           "terms",
           "areas",
           "installation"
@@ -4940,6 +4955,387 @@
         "required": [
           "items",
           "unreadCount"
+        ]
+      },
+      "ReportType": {
+        "type": "string",
+        "enum": [
+          "proof-pack",
+          "billing-statement",
+          "zone-summary",
+          "vehicle-summary",
+          "km-detail"
+        ],
+        "description": "proof-pack is the dated HTML document. The others are CSVs of the same billed kilometres."
+      },
+      "ReportFormat": {
+        "type": "string",
+        "enum": [
+          "html",
+          "csv"
+        ]
+      },
+      "ExportReportRequest": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The campaign whose billed kilometres are exported."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ReportType"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "example": "2026-09-08",
+            "description": "Civil day in Asia/Kolkata."
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "example": "2026-09-08",
+            "description": "Civil day in Asia/Kolkata."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "html",
+              "csv"
+            ],
+            "description": "Ignored. The type picks the format — proof-pack is HTML, the rest are CSV."
+          }
+        },
+        "required": [
+          "campaignId",
+          "type",
+          "from",
+          "to"
+        ]
+      },
+      "ReportExport": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ReportType"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ReportFormat"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "example": "2026-09-08",
+            "description": "Civil day in Asia/Kolkata."
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "example": "2026-09-08",
+            "description": "Civil day in Asia/Kolkata."
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer"
+          },
+          "checksum": {
+            "type": "string",
+            "description": "SHA-256 of the file bytes."
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "format",
+          "campaignId",
+          "campaignName",
+          "from",
+          "to",
+          "fileName",
+          "contentType",
+          "byteSize",
+          "checksum",
+          "generatedAt",
+          "expiresAt",
+          "status"
+        ]
+      },
+      "ReportExportList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportExport"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VisibilityCutoffs": {
+        "type": "object",
+        "properties": {
+          "high": {
+            "type": "string",
+            "description": "Published cutoff for a crawl / jam / signal."
+          },
+          "medium": {
+            "type": "string",
+            "description": "Published cutoff for ordinary city traffic."
+          },
+          "low": {
+            "type": "string",
+            "description": "Published cutoff for a fly-by."
+          }
+        },
+        "required": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "description": "The 15 / 35 km/h bands, written out so an advertiser can argue with them. Platform-fixed, not advertiser-editable."
+      },
+      "VisibilityPlace": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "signal",
+              "mall",
+              "transit",
+              "residential",
+              "junction"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "A mapped name when Overpass knew one; otherwise the kind label."
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          },
+          "km": {
+            "type": "number",
+            "description": "Readable kilometres that sat in this cluster."
+          },
+          "seconds": {
+            "type": "integer"
+          },
+          "visits": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "gps",
+              "osm"
+            ],
+            "description": "gps is a dwell the fixes found; osm means a mapped feature renamed it."
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "lat",
+          "lng",
+          "km",
+          "seconds",
+          "visits",
+          "source"
+        ],
+        "description": "A place the wrap was readable. First a GPS cluster, then optionally named from OpenStreetMap. Not a billing input."
+      },
+      "VisibilityKindTotal": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "signal",
+              "mall",
+              "transit",
+              "residential",
+              "junction"
+            ]
+          },
+          "km": {
+            "type": "number"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "km",
+          "count"
+        ]
+      },
+      "DaypartWindows": {
+        "type": "object",
+        "properties": {
+          "morning": {
+            "type": "string"
+          },
+          "midday": {
+            "type": "string"
+          },
+          "evening": {
+            "type": "string"
+          },
+          "night": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "morning",
+          "midday",
+          "evening",
+          "night"
+        ],
+        "description": "The IST clock windows, written out so an advertiser can argue with them. Platform-fixed, not advertiser-editable."
+      },
+      "CampaignDayparts": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "Which clock windows produced these figures."
+          },
+          "morningKm": {
+            "type": "number"
+          },
+          "middayKm": {
+            "type": "number"
+          },
+          "eveningKm": {
+            "type": "number"
+          },
+          "nightKm": {
+            "type": "number"
+          },
+          "readableKm": {
+            "type": "number",
+            "description": "highKm + mediumKm. Fly-bys are omitted so daytime speed does not mint a peak."
+          },
+          "peakShare": {
+            "type": "number",
+            "description": "(morningKm + eveningKm) / readableKm, or 0 when nothing was slow enough to read."
+          },
+          "windows": {
+            "$ref": "#/components/schemas/DaypartWindows"
+          }
+        },
+        "required": [
+          "version",
+          "morningKm",
+          "middayKm",
+          "eveningKm",
+          "nightKm",
+          "readableKm",
+          "peakShare",
+          "windows"
+        ],
+        "description": "Of the kilometres slow enough to read, when in the IST day they ran. Not a people count and not a billing input."
+      },
+      "CampaignVisibility": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "string",
+            "description": "Which cutoffs produced these figures. A campaign is not re-banded silently."
+          },
+          "highKm": {
+            "type": "number",
+            "description": "Billable kilometres driven below the high-visibility cutoff."
+          },
+          "mediumKm": {
+            "type": "number"
+          },
+          "lowKm": {
+            "type": "number"
+          },
+          "classifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres that were classifiable. Parked and near-zero stretches are omitted, so this can be smaller than the campaign's verified kilometres."
+          },
+          "highShare": {
+            "type": "number",
+            "description": "highKm / classifiedKm, or 0 when nothing classifiable was driven."
+          },
+          "bands": {
+            "$ref": "#/components/schemas/VisibilityCutoffs"
+          },
+          "places": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityPlace"
+            },
+            "description": "Readable dwells on this campaign — junctions first, renamed when a signal, mall, station or apartment sits in the same 80 m. A fly-by is not a place."
+          },
+          "byKind": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityKindTotal"
+            }
+          },
+          "when": {
+            "$ref": "#/components/schemas/CampaignDayparts"
+          }
+        },
+        "required": [
+          "campaignId",
+          "version",
+          "highKm",
+          "mediumKm",
+          "lowKm",
+          "classifiedKm",
+          "highShare",
+          "bands",
+          "places",
+          "byKind",
+          "when"
         ]
       },
       "GpsPoint": {
@@ -5386,6 +5782,420 @@
         "required": [
           "trips",
           "nextBefore"
+        ]
+      },
+      "CampaignDriver": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "CampaignTrip": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The drive's first segment, which is what names the trip."
+          },
+          "vehicleRegistration": {
+            "type": "string",
+            "description": "The plate that was carrying the wrap."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres only. Held distance is not counted here."
+          },
+          "charge": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "What these kilometres cost the advertiser."
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "idleSecondsBefore": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "How long the vehicle stood still before this drive. Null when it opened a shift."
+          },
+          "impressions": {
+            "type": "integer",
+            "description": "Modelled opportunities-to-see on the billed hops of this drive. Not a people count, and not a billing input."
+          }
+        },
+        "required": [
+          "id",
+          "vehicleRegistration",
+          "startedAt",
+          "endedAt",
+          "verifiedKm",
+          "charge",
+          "status",
+          "idleSecondsBefore",
+          "impressions"
+        ]
+      },
+      "CampaignRosterDriver": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "vehicleRegistration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plate currently assigned, or the last one that drove this campaign."
+          },
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verifiedKm": {
+            "type": "number",
+            "description": "Billable kilometres on this campaign. Held distance is not counted."
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "RUNNING",
+              "IDLE",
+              "OFFLINE",
+              "GPS_PAUSED",
+              null
+            ],
+            "description": "Live state of the assigned vehicle. Null when nothing is assigned to read."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "vehicleRegistration",
+          "area",
+          "verifiedKm",
+          "state"
+        ]
+      },
+      "CampaignRoster": {
+        "type": "object",
+        "properties": {
+          "drivers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignRosterDriver"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "How many drivers match the search, before this page is cut."
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "drivers",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "CampaignTrips": {
+        "type": "object",
+        "properties": {
+          "drivers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignDriver"
+            },
+            "description": "The roster for the driver picker. Not filtered when `driverId` is set."
+          },
+          "trips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignTrip"
+            },
+            "description": "Newest first."
+          },
+          "total": {
+            "type": "integer",
+            "description": "How many trips match the search and status, before this page is cut."
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "statusCounts": {
+            "type": "object",
+            "properties": {
+              "all": {
+                "type": "integer"
+              },
+              "verified": {
+                "type": "integer"
+              },
+              "pending_review": {
+                "type": "integer"
+              },
+              "rejected": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "all",
+              "verified",
+              "pending_review",
+              "rejected"
+            ],
+            "description": "Counts after search, before the status filter, so the filter menu stays honest."
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Deprecated. Pass back as `before` for the next page. Null at the end of the feed."
+          }
+        },
+        "required": [
+          "drivers",
+          "trips",
+          "total",
+          "limit",
+          "offset",
+          "statusCounts",
+          "nextBefore"
+        ]
+      },
+      "CampaignTripLeg": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string",
+            "enum": [
+              "prime",
+              "secondary",
+              "network"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "BILLABLE",
+              "PENDING_REVIEW",
+              "NON_BILLABLE"
+            ]
+          },
+          "flagReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why this stretch has not been billed. Null unless it is held or refused."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "distanceKm": {
+            "type": "number"
+          },
+          "advertiserRate": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "advertiserCharge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "segments": {
+            "type": "integer"
+          },
+          "visibility": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              null
+            ],
+            "description": "How readable the wrap was on this stretch, from GPS speed. Null when the stretch is held, parked, or too short to classify. Not a billing input."
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lat": {
+                  "type": "number"
+                },
+                "lng": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "lat",
+                "lng"
+              ]
+            },
+            "description": "The line to draw, in order."
+          }
+        },
+        "required": [
+          "zone",
+          "state",
+          "flagReason",
+          "startedAt",
+          "endedAt",
+          "distanceKm",
+          "advertiserRate",
+          "advertiserCharge",
+          "segments",
+          "visibility",
+          "path"
+        ]
+      },
+      "CampaignParked": {
+        "type": "object",
+        "properties": {
+          "seconds": {
+            "type": "integer",
+            "description": "How long it stood still before this drive began."
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "seconds",
+          "lat",
+          "lng"
+        ]
+      },
+      "CampaignTripDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "vehicleRegistration": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null while the trip is still running."
+          },
+          "distanceKm": {
+            "type": "number"
+          },
+          "advertiserCharge": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignTripLeg"
+            },
+            "description": "Consecutive stretches agreeing on zone, state, reason and visibility, merged into one run each. Held stretches are included so the map accounts for every kilometre driven, not only the billed ones. The admin audit of the same trip still merges on zone only."
+          },
+          "places": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VisibilityPlace"
+            },
+            "description": "Readable dwells on this trip, pinned on the map. GPS clusters first; OpenStreetMap may rename a cluster as a signal, mall, station or apartment. Not a billing input."
+          },
+          "parked": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignParked"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Where the vehicle stood still before this drive. Null on the first drive of a shift — that gap is off duty, not a park."
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "vehicleRegistration",
+          "startedAt",
+          "endedAt",
+          "distanceKm",
+          "advertiserCharge",
+          "status",
+          "legs",
+          "places",
+          "parked"
         ]
       },
       "DriverTripLeg": {
@@ -12424,6 +13234,299 @@
         }
       }
     },
+    "/v1/reports/export": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Generate a campaign report",
+        "description": "Builds the file immediately and returns the export record. Download it from `/v1/reports/{id}/download`.\n\nThe proof pack is an HTML document: campaign cover, zone mix, readability, modelled impressions with the baseline mix, and a few sample-day workings. Print it to PDF.\n\nThe CSVs are billing-statement, zone-summary, vehicle-summary (plates anonymised) and km-detail. A kilometre-detail over too many rows is refused rather than queued.\n\nRequires `advertiser.report.read`. A campaign belonging to another advertiser is not found.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The export is ready to download.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account, or missing advertiser.report.read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The kilometre-detail export is too large for this period.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Recent exports",
+        "description": "Exports generated in the last seven days for this advertiser. Expired rows are omitted.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportExportList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account, or missing advertiser.report.read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/{id}/download": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Download an export",
+        "description": "The file itself. Available for seven days. Re-downloadable until then — not single-use.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file. Filename is in Content-Disposition.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account, or missing advertiser.report.read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown, expired, or belonging to another advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/visibility": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "How readable the wrap was",
+        "description": "The campaign's billable driving, split by how fast the vehicle was moving.\n\nSlow driving is easier to read. This is not what you are billed on — verified kilometres stay the unit the contract is written in, and nothing here multiplies a charge or an earning.\n\nSpeed is derived from each GPS pair's own distance and duration, the same formula the impression model already uses. A pair clipped at a zone boundary keeps the vehicle's speed; only its distance is split. Parked and near-zero stretches are omitted so a night in a depot cannot become high visibility.\n\nPlaces are a second read of the same pairs: high and medium samples are clustered within 80 m, then optionally named from OpenStreetMap (signals, malls, transit, apartments). Overpass is best-effort — a timeout returns the GPS junctions unnamed rather than failing the mix. Neither layer multiplies a charge.\n\n`when` is a third read of the same high and medium pairs, bucketed by the IST hour the pair started. Morning 07–11, midday 11–17, evening 17–21, night 21–07. A daytime fly-by is not a peak hour. Nothing here is a people count.\n\nScoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The mix. Zero totals for a campaign that has not been driven yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignVisibility"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/driver/earnings": {
       "get": {
         "tags": [
@@ -13186,6 +14289,357 @@
           },
           "404": {
             "description": "No such session for this driver.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/drivers": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Who is carrying this campaign",
+        "description": "The roster an advertiser sees on the campaign page: assigned drivers, and anyone who has already driven it.\n\n`q` matches a driver name or a plate. The list is paged with `limit` and `offset`, because a roster is stable enough to count.\n\nScoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "Match a driver name or a vehicle registration, spaces ignored on the plate."
+            },
+            "required": false,
+            "description": "Match a driver name or a vehicle registration, spaces ignored on the plate.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of drivers. An empty list when nobody is on the campaign yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRoster"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/trips": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Trips recorded while carrying this campaign",
+        "description": "Every drive the fleet recorded under this campaign, newest first.\n\nA trip is a journey between two stops, the same cut the driver app collects — not a press of Start, and not a priced segment. The most recent one is what an advertiser opening the campaign expects to see on the map.\n\nCarries the advertiser charge and the plate, and nothing about the driver or what they earned. The admin audit of the same segments sits behind its own permission for that reason.\n\nScoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Limit the list to one driver on this campaign."
+            },
+            "required": false,
+            "description": "Limit the list to one driver on this campaign.",
+            "name": "driverId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80,
+              "description": "Match a plate or the trip date (IST). Spaces on the plate are ignored."
+            },
+            "required": false,
+            "description": "Match a plate or the trip date (IST). Spaces on the plate are ignored.",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "verified",
+                "pending_review",
+                "rejected"
+              ],
+              "description": "Limit the list to one trip status."
+            },
+            "required": false,
+            "description": "Limit the list to one trip status.",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Deprecated cursor. Prefer `offset`. Return trips that started strictly before this instant."
+            },
+            "required": false,
+            "description": "Deprecated cursor. Prefer `offset`. Return trips that started strictly before this instant.",
+            "name": "before",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of trips. An empty list for a campaign that has not been driven yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignTrips"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such campaign for this advertiser.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/trips/{tripId}": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "One campaign trip, opened up",
+        "description": "Where one of the campaign's trips actually ran, coloured by the zone each stretch was classified into, or by how readable the wrap was.\n\nReturned as runs rather than raw segments. Consecutive segments agreeing on zone, state, reason and visibility are the same fact about the journey, so they are merged and counted. A Prime stretch that crawls then flies is two runs, because those are two different claims about whether anyone could read the wrap.\n\nThe driver's rate and earning are not on the legs. Asking for a trip that is not this campaign's is not found, the same as a trip that does not exist.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignTripDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an advertiser account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trip on this campaign.",
             "content": {
               "application/json": {
                 "schema": {

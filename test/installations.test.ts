@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest';
 
 import { pingDatabase, sequelize } from '../src/db/sequelize';
+import { Campaign } from '../src/modules/campaigns/campaigns.model';
 
 import { type Agent, client, enrolAndVerify, signIn } from './helpers/admin';
 import { captureMail, type MailInbox } from './helpers/mail';
@@ -50,7 +51,7 @@ const CAMPAIGN = {
   city: 'Bengaluru',
   vehicleType: 'CAB',
   startDate: '2026-09-01',
-  endDate: '2026-09-30',
+  endDate: '2026-12-31',
   zonePrimeKm: '4000',
   zoneSecondaryKm: '15000',
 };
@@ -597,6 +598,19 @@ describe('a campaign that is already running', () => {
     expect(campaign.body).toMatchObject({ name: CAMPAIGN.name, status: 'completed' });
     // And it cannot be driven for.
     expect((await driver.get('/v1/driver/eligibility').expect(200)).body.eligible).toBe(false);
+  });
+
+  it('reads as completed once the last campaign day has passed', async () => {
+    const { campaignId, driverId } = await liveCampaign();
+    await Campaign.update({ endDate: '2026-08-31' }, { where: { id: campaignId } });
+
+    const driver = await signInDriver(driverId);
+    const campaign = await driver.get('/v1/driver/campaign').expect(200);
+    expect(campaign.body.status).toBe('completed');
+
+    const checks = checksOf((await driver.get('/v1/driver/eligibility').expect(200)).body);
+    expect(byId(checks, 'ad_installed').passed).toBe(false);
+    expect(byId(checks, 'ad_installed').remedy).toMatch(/new campaign is assigned/i);
   });
 
   it('does not dress a withdrawal up as a completion', async () => {

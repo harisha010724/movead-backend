@@ -6,8 +6,13 @@ import { config } from '../../shared/config';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
 import type { LatLng, Zone, ZonePolygons } from '../../shared/geo';
 import { IST, istDate, istMonth } from '../../shared/time';
+import { bandOf, type VisibilityBand } from '../../visibility/bands';
+import { namedPlaces } from '../../visibility/namedPlaces';
+import { type DwellSample, type VisibilityPlace } from '../../visibility/places';
+import { CURRENT_MODEL_VERSION } from '../../impressions/coefficients';
 import { Campaign } from '../campaigns/campaigns.model';
 import { Driver, Vehicle } from '../drivers/drivers.model';
+import { computeMissing } from '../impressions/impressions.service';
 import { eligibility } from '../installations/eligibility';
 import { CampaignVehicle, LIVE_ASSIGNMENT } from '../installations/installations.model';
 
@@ -1060,7 +1065,7 @@ interface PlacedSegment extends SegmentRow {
  * Returns null when the id is not a segment of this session, which is the same
  * answer as "no such trip".
  */
-function driveOf(rows: SegmentRow[], tripId: string): SegmentRow[] | null {
+function drivesOf(rows: SegmentRow[]): SegmentRow[][] {
   const gapMs = config.tracking.tripGapSeconds * 1000;
   const drives: SegmentRow[][] = [];
 
@@ -1074,7 +1079,33 @@ function driveOf(rows: SegmentRow[], tripId: string): SegmentRow[] | null {
     else current.push(segment);
   }
 
-  return drives.find((drive) => drive.some((segment) => segment.id === tripId)) ?? null;
+  return drives;
+}
+
+function driveOf(rows: SegmentRow[], tripId: string): SegmentRow[] | null {
+  return drivesOf(rows).find((drive) => drive.some((segment) => segment.id === tripId)) ?? null;
+}
+
+/** The wait before this drive, pinned where the previous one ended. */
+function parkedBefore(rows: SegmentRow[], tripId: string): ParkedStop | null {
+  const drives = drivesOf(rows);
+  const index = drives.findIndex((drive) => drive.some((segment) => segment.id === tripId));
+  if (index <= 0) return null;
+
+  const previous = drives[index - 1];
+  const current = drives[index];
+  const last = previous?.at(-1);
+  const first = current?.[0];
+  if (!last || !first) return null;
+
+  const seconds = Math.round((first.started_at.getTime() - last.ended_at.getTime()) / 1000);
+  if (seconds <= 0) return null;
+
+  return {
+    seconds,
+    lat: Number(Number(last.to_lat).toFixed(6)),
+    lng: Number(Number(last.to_lon).toFixed(6)),
+  };
 }
 
 /**
@@ -1255,6 +1286,563 @@ function groupConsecutive<T, K>(items: T[], key: (item: T) => K): [K, T[]][] {
   return groups;
 }
 
+// --- The advertiser's trip feed ------------------------------------------
+
+export interface CampaignDriverView {
+  id: string;
+  name: string;
+}
+
+export interface CampaignTripView {
+  id: string;
+  vehicleRegistration: string;
+  startedAt: string;
+  endedAt: string;
+  verifiedKm: number;
+  /** What these kilometres cost the advertiser, not what the driver earned. */
+  charge: Money;
+  status: TripStatus;
+  idleSecondsBefore: number | null;
+  /** Modelled opportunities-to-see on the billed hops. Not a people count. */
+  impressions: number;
+}
+
+export interface CampaignTripStatusCounts {
+  all: number;
+  verified: number;
+  pending_review: number;
+  rejected: number;
+}
+
+export interface CampaignTripsView {
+  /** Everyone assigned to the campaign, or who has already driven it. */
+  drivers: CampaignDriverView[];
+  trips: CampaignTripView[];
+  total: number;
+  limit: number;
+  offset: number;
+  statusCounts: CampaignTripStatusCounts;
+  nextBefore: string | null;
+}
+
+interface CampaignTripRow extends TripRow {
+  charge: string;
+  impressions: string | number;
+  registration_number: string;
+  total: string | number;
+  count_all: string | number;
+  count_verified: string | number;
+  count_pending_review: string | number;
+  count_rejected: string | number;
+}
+
+/**
+ * Every drive recorded while carrying this campaign, newest first.
+ *
+ * The same cut the driver feed makes — a trip is a journey between two stops,
+ * not a press of Start — scoped to the campaign rather than the person. An
+ * advertiser asking "what did my wrap actually do" is asking this, not the
+ * day-bucketed audience next to it.
+ *
+ * Driver money is not on the row. Names are, so the advertiser can pick whose
+ * trips to open — the same names the vehicles table already shows.
+ */
+export async function campaignTrips(
+  campaignId: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    before?: string | null;
+    driverId?: string | null;
+    q?: string | null;
+    status?: TripStatus | null;
+  } = {},
+): Promise<CampaignTripsView> {
+  const limit = Math.min(Math.max(options.limit ?? 25, 1), MAX_TRIP_PAGE);
+  const offset = Math.max(options.offset ?? 0, 0);
+  const before = options.before ?? null;
+  const driverId = options.driverId ?? null;
+  const q = options.q?.trim() || null;
+  const needle = q ? q.replace(/\s+/g, '').toUpperCase() : null;
+  const status = options.status ?? null;
+  const scope = driverId
+    ? 's.campaign_id = :campaignId AND s.driver_id = :driverId'
+    : 's.campaign_id = :campaignId';
+
+  await computeMissing(CURRENT_MODEL_VERSION, { campaignId });
+
+  const [drivers, rows] = await Promise.all([
+    campaignDrivers(campaignId),
+    sequelize.query<CampaignTripRow>(
+      `${drivesFrom(scope)},
+       grouped AS (
+         SELECT ${DRIVE_COLUMNS},
+                a.vehicle_id,
+                COALESCE(SUM(a.advertiser_charge) FILTER (WHERE a.state = 'BILLABLE'), 0) AS charge,
+                COALESCE((
+                  SELECT SUM(si.impressions)
+                    FROM segment_impressions si
+                   WHERE si.model_version = :impressionVersion
+                     AND si.segment_id IN (
+                       SELECT DISTINCT a2.id
+                         FROM anchored a2
+                        WHERE a2.trip_id = a.trip_id
+                          AND a2.state = 'BILLABLE'
+                     )
+                ), 0) AS impressions
+           FROM anchored a
+          GROUP BY a.trip_id, a.session_id, a.vehicle_id
+       ),
+       labelled AS (
+         SELECT g.*,
+                v.registration_number,
+                ${IDLE_SECONDS},
+                CASE
+                  WHEN g.pending::int > 0 THEN 'pending_review'
+                  WHEN g.billable::int > 0 THEN 'verified'
+                  ELSE 'rejected'
+                END AS trip_status
+           FROM grouped g
+           JOIN vehicles v ON v.id = g.vehicle_id
+       ),
+       searched AS (
+         SELECT *
+           FROM labelled
+          WHERE (:before::timestamptz IS NULL OR started_at < :before::timestamptz)
+            AND (
+                  :q::text IS NULL
+               OR replace(upper(registration_number), ' ', '') LIKE '%' || :needle || '%'
+               OR to_char(started_at AT TIME ZONE 'Asia/Kolkata', 'DD Mon YYYY') ILIKE '%' || :q || '%'
+               OR to_char(started_at AT TIME ZONE 'Asia/Kolkata', 'FMDD Mon YYYY') ILIKE '%' || :q || '%'
+               OR to_char(started_at AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM-DD') LIKE '%' || :q || '%'
+            )
+       )
+       SELECT s.*,
+              (SELECT count(*) FROM searched WHERE :status::text IS NULL OR trip_status = :status) AS total,
+              (SELECT count(*) FROM searched) AS count_all,
+              (SELECT count(*) FROM searched WHERE trip_status = 'verified') AS count_verified,
+              (SELECT count(*) FROM searched WHERE trip_status = 'pending_review') AS count_pending_review,
+              (SELECT count(*) FROM searched WHERE trip_status = 'rejected') AS count_rejected
+         FROM searched s
+        WHERE :status::text IS NULL OR trip_status = :status
+        ORDER BY started_at DESC
+        LIMIT :limit OFFSET :offset`,
+      {
+        replacements: {
+          campaignId,
+          driverId,
+          before,
+          q,
+          needle,
+          status,
+          limit,
+          offset,
+          tripGapSeconds: config.tracking.tripGapSeconds,
+          impressionVersion: CURRENT_MODEL_VERSION,
+        },
+        type: QueryTypes.SELECT,
+      },
+    ),
+  ]);
+
+  const trips = rows.map((row) => ({
+    id: row.trip_id,
+    vehicleRegistration: row.registration_number,
+    startedAt: row.started_at.toISOString(),
+    endedAt: row.ended_at.toISOString(),
+    verifiedKm: asKm(row.km),
+    charge: toLedger(money(row.charge)),
+    status: statusOf(row),
+    idleSecondsBefore: row.idle_seconds,
+    impressions: Math.round(Number(row.impressions)),
+  }));
+
+  const last = offset + trips.length < Number(rows[0]?.total ?? 0) ? trips.at(-1) : undefined;
+  const emptyCounts = { all: 0, verified: 0, pending_review: 0, rejected: 0 };
+
+  return {
+    drivers,
+    trips,
+    total: Number(rows[0]?.total ?? 0),
+    limit,
+    offset,
+    statusCounts: rows[0]
+      ? {
+          all: Number(rows[0].count_all),
+          verified: Number(rows[0].count_verified),
+          pending_review: Number(rows[0].count_pending_review),
+          rejected: Number(rows[0].count_rejected),
+        }
+      : emptyCounts,
+    nextBefore: last?.startedAt ?? null,
+  };
+}
+
+/**
+ * Who is on this campaign, for the advertiser's driver picker.
+ *
+ * Assigned drivers who have not driven yet still appear, so the dropdown is
+ * the roster rather than only people with a trip. Anyone who has already
+ * recorded a segment is included even if their assignment later ended.
+ */
+async function campaignDrivers(campaignId: string): Promise<CampaignDriverView[]> {
+  return sequelize.query<CampaignDriverView>(
+    `SELECT d.id, d.name
+       FROM drivers d
+      WHERE d.id IN (
+              SELECT cv.driver_id
+                FROM campaign_vehicles cv
+               WHERE cv.campaign_id = :campaignId
+                 AND cv.status IN ('ASSIGNED', 'ACCEPTED', 'INSTALLING', 'ACTIVE')
+              UNION
+              SELECT s.driver_id
+                FROM trip_segments s
+               WHERE s.campaign_id = :campaignId
+            )
+      ORDER BY d.name`,
+    { replacements: { campaignId }, type: QueryTypes.SELECT },
+  );
+}
+
+const ROSTER_PAGE = 5;
+const GPS_SILENCE_MINUTES = 10;
+
+export interface CampaignRosterDriverView {
+  id: string;
+  name: string;
+  vehicleRegistration: string | null;
+  area: string | null;
+  verifiedKm: number;
+  state: 'RUNNING' | 'IDLE' | 'OFFLINE' | 'GPS_PAUSED' | null;
+}
+
+export interface CampaignRosterView {
+  drivers: CampaignRosterDriverView[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+interface CampaignRosterRow {
+  id: string;
+  name: string;
+  vehicle_registration: string | null;
+  area: string | null;
+  verified_km: string;
+  state: CampaignRosterDriverView['state'];
+  total: string | number;
+}
+
+/**
+ * The campaign page roster: who is assigned, or who has already driven it.
+ *
+ * Search is a name or a plate. The page is an offset because a roster does
+ * not grow at the top the way a trip feed does, so a count is stable.
+ */
+export async function campaignRoster(
+  campaignId: string,
+  options: { q?: string | null; limit?: number; offset?: number } = {},
+): Promise<CampaignRosterView> {
+  const limit = Math.min(Math.max(options.limit ?? ROSTER_PAGE, 1), MAX_TRIP_PAGE);
+  const offset = Math.max(options.offset ?? 0, 0);
+  const q = options.q?.trim() || null;
+  const needle = q ? q.replace(/\s+/g, '').toUpperCase() : null;
+
+  const rows = await sequelize.query<CampaignRosterRow>(
+    `WITH roster AS (
+       SELECT d.id,
+              d.name,
+              COALESCE(d.base_label, d.address_city, d.city) AS area
+         FROM drivers d
+        WHERE d.id IN (
+                SELECT cv.driver_id
+                  FROM campaign_vehicles cv
+                 WHERE cv.campaign_id = :campaignId
+                   AND cv.status IN ('ASSIGNED', 'ACCEPTED', 'INSTALLING', 'ACTIVE')
+                UNION
+                SELECT s.driver_id
+                  FROM trip_segments s
+                 WHERE s.campaign_id = :campaignId
+              )
+     ),
+     assigned AS (
+       SELECT DISTINCT ON (cv.driver_id)
+              cv.driver_id,
+              v.id AS vehicle_id,
+              v.registration_number
+         FROM campaign_vehicles cv
+         JOIN vehicles v ON v.id = cv.vehicle_id
+        WHERE cv.campaign_id = :campaignId
+          AND cv.status IN ('ASSIGNED', 'ACCEPTED', 'INSTALLING', 'ACTIVE')
+        ORDER BY cv.driver_id, cv.assigned_at DESC
+     ),
+     driven AS (
+       SELECT DISTINCT ON (s.driver_id)
+              s.driver_id,
+              v.id AS vehicle_id,
+              v.registration_number
+         FROM trip_segments s
+         JOIN vehicles v ON v.id = s.vehicle_id
+        WHERE s.campaign_id = :campaignId
+        ORDER BY s.driver_id, s.started_at DESC
+     ),
+     km AS (
+       SELECT s.driver_id,
+              COALESCE(SUM(s.distance_km) FILTER (WHERE s.state = 'BILLABLE'), 0) AS verified_km
+         FROM trip_segments s
+        WHERE s.campaign_id = :campaignId
+        GROUP BY s.driver_id
+     ),
+     live AS (
+       SELECT v.id,
+              CASE
+                WHEN s.id IS NULL THEN 'IDLE'
+                WHEN p.recorded_at IS NULL THEN 'OFFLINE'
+                WHEN p.recorded_at < now() - (:silence || ' minutes')::interval THEN 'GPS_PAUSED'
+                ELSE 'RUNNING'
+              END AS state
+         FROM campaign_vehicles cv
+         JOIN vehicles v ON v.id = cv.vehicle_id
+         LEFT JOIN tracking_sessions s
+                ON s.campaign_vehicle_id = cv.id AND s.status = 'ACTIVE'
+         LEFT JOIN LATERAL (
+                SELECT g.recorded_at
+                  FROM gps_points g
+                 WHERE g.session_id = s.id
+                 ORDER BY g.recorded_at DESC
+                 LIMIT 1
+              ) p ON TRUE
+        WHERE cv.campaign_id = :campaignId
+          AND cv.status IN ('ACCEPTED', 'INSTALLING', 'ACTIVE')
+     ),
+     rows AS (
+       SELECT r.id,
+              r.name,
+              r.area,
+              COALESCE(a.registration_number, d.registration_number) AS vehicle_registration,
+              COALESCE(k.verified_km, 0) AS verified_km,
+              live.state
+         FROM roster r
+         LEFT JOIN assigned a ON a.driver_id = r.id
+         LEFT JOIN driven d ON d.driver_id = r.id
+         LEFT JOIN km k ON k.driver_id = r.id
+         LEFT JOIN live ON live.id = COALESCE(a.vehicle_id, d.vehicle_id)
+     )
+     SELECT *, COUNT(*) OVER() AS total
+       FROM rows
+      WHERE :q::text IS NULL
+         OR name ILIKE '%' || :q || '%'
+         OR replace(upper(COALESCE(vehicle_registration, '')), ' ', '')
+              LIKE '%' || :needle || '%'
+      ORDER BY name
+      LIMIT :limit OFFSET :offset`,
+    {
+      replacements: {
+        campaignId,
+        q,
+        needle,
+        limit,
+        offset,
+        silence: GPS_SILENCE_MINUTES,
+      },
+      type: QueryTypes.SELECT,
+    },
+  );
+
+  return {
+    drivers: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      vehicleRegistration: row.vehicle_registration,
+      area: row.area,
+      verifiedKm: asKm(String(row.verified_km)),
+      state: row.state,
+    })),
+    total: Number(rows[0]?.total ?? 0),
+    limit,
+    offset,
+  };
+}
+
+export interface CampaignTripLeg {
+  zone: Zone;
+  state: SegmentState;
+  flagReason: string | null;
+  startedAt: string;
+  endedAt: string;
+  distanceKm: number;
+  advertiserRate: Money;
+  advertiserCharge: Money;
+  segments: number;
+  /**
+   * How readable the wrap was on this stretch. Null when it is held, parked,
+   * or too short to classify. Not a billing input.
+   */
+  visibility: VisibilityBand | null;
+  path: LatLng[];
+}
+
+export interface CampaignTripDetailView {
+  id: string;
+  vehicleRegistration: string;
+  startedAt: string;
+  endedAt: string | null;
+  distanceKm: number;
+  advertiserCharge: Money;
+  status: TripStatus;
+  legs: CampaignTripLeg[];
+  /** Readable dwells on this trip — junctions first, named when the map knows. */
+  places: VisibilityPlace[];
+  /**
+   * Where the vehicle stood still before this drive, and for how long.
+   * Null on the first drive of a shift — that gap is off duty, not a park.
+   */
+  parked: ParkedStop | null;
+}
+
+export interface ParkedStop {
+  seconds: number;
+  lat: number;
+  lng: number;
+}
+
+/**
+ * One of the campaign's trips, opened onto the ground it was driven on.
+ *
+ * The same priced ground the audit screen shows an operator, with the
+ * driver's side of every run removed — and split again wherever the wrap
+ * became more or less readable. A Prime stretch that crawls then flies is
+ * two runs here, because those are two different claims about whether anyone
+ * could read it. The admin audit still merges on zone only: that screen
+ * answers a rate question, not a readability one.
+ *
+ * What a kilometre paid the person who drove it is not the advertiser's
+ * business and is not merely omitted — the legs are rebuilt field by field,
+ * so a field added to `TripLeg` later cannot arrive here by inheritance.
+ */
+export async function campaignTrip(
+  campaignId: string,
+  tripId: string,
+): Promise<CampaignTripDetailView> {
+  const anchor = await TripSegment.findByPk(tripId);
+
+  // One answer for "no such trip" and "not this campaign's". Telling the two
+  // apart would let any advertiser test whether a trip id exists.
+  if (!anchor || anchor.campaignId !== campaignId) throw new NotFoundError('Trip');
+
+  const [vehicle, rows] = await Promise.all([
+    Vehicle.findByPk(anchor.vehicleId),
+    segmentsOf(anchor.sessionId),
+  ]);
+
+  const drive = driveOf(rows, tripId);
+  if (!drive) throw new NotFoundError('Trip');
+
+  const totals = totalsOf(drive);
+
+  return {
+    id: totals.id,
+    vehicleRegistration: vehicle?.registrationNumber ?? '',
+    startedAt: totals.startedAt,
+    endedAt: totals.endedAt,
+    distanceKm: totals.verifiedKm,
+    advertiserCharge: toLedger(sum(totals.billable.map((row) => row.advertiser_charge))),
+    status: totals.status,
+    legs: intoCampaignLegs(drive),
+    places: await placesOf(drive),
+    parked: parkedBefore(rows, tripId),
+  };
+}
+
+async function placesOf(rows: SegmentRow[]): Promise<VisibilityPlace[]> {
+  const samples: DwellSample[] = [];
+
+  for (const part of classify(rows)) {
+    if (part.visibility !== 'high' && part.visibility !== 'medium') continue;
+    samples.push({
+      lat: part.from.lat,
+      lng: part.from.lng,
+      km: Number(part.distance_km),
+      seconds: (part.ended_at.getTime() - part.started_at.getTime()) / 1000,
+      band: part.visibility,
+    });
+  }
+
+  return namedPlaces(samples);
+}
+
+interface ClassifiedSegment extends PlacedSegment {
+  visibility: VisibilityBand | null;
+}
+
+/**
+ * Band each GPS pair, then merge consecutive parts that still say the same
+ * thing — including the band.
+ *
+ * Speed is taken from the pair, not from each clipped part. A pair that
+ * crosses a zone boundary shares one duration; attributing each part by its
+ * own distance over that duration would make every crossing look slower than
+ * the vehicle was.
+ */
+function classify(rows: SegmentRow[]): ClassifiedSegment[] {
+  const placed = place(rows);
+  const pairBand = new Map<string, VisibilityBand | null>();
+
+  for (const [, parts] of groupConsecutive(placed, (part) => part.from_point_id)) {
+    const head = parts[0] as PlacedSegment;
+    const seconds = (head.ended_at.getTime() - head.started_at.getTime()) / 1000;
+    const distanceKm = parts.reduce((km, part) => km + Number(part.distance_km), 0);
+    pairBand.set(head.from_point_id, bandOf(distanceKm, seconds));
+  }
+
+  return placed.map((part) => ({
+    ...part,
+    visibility: part.state === 'BILLABLE' ? (pairBand.get(part.from_point_id) ?? null) : null,
+  }));
+}
+
+function sameCampaignRun(a: ClassifiedSegment, b: ClassifiedSegment): boolean {
+  return sameRun(a, b) && a.visibility === b.visibility;
+}
+
+function intoCampaignLegs(rows: SegmentRow[]): CampaignTripLeg[] {
+  const legs: CampaignTripLeg[] = [];
+  let run: ClassifiedSegment[] = [];
+
+  const flush = () => {
+    if (run.length > 0) legs.push(toCampaignLeg(run));
+    run = [];
+  };
+
+  for (const segment of classify(rows)) {
+    const previous = run.at(-1);
+    if (previous && !sameCampaignRun(previous, segment)) flush();
+    run.push(segment);
+  }
+  flush();
+
+  return legs;
+}
+
+function toCampaignLeg(run: ClassifiedSegment[]): CampaignTripLeg {
+  const first = run[0] as ClassifiedSegment;
+  const last = run.at(-1) as ClassifiedSegment;
+
+  return {
+    zone: first.zone.toLowerCase() as Zone,
+    state: first.state,
+    flagReason: first.flag_reason,
+    startedAt: first.started_at.toISOString(),
+    endedAt: last.ended_at.toISOString(),
+    distanceKm: asKm(toLedger(sum(run.map((part) => part.distance_km)))),
+    advertiserRate: first.advertiser_rate,
+    advertiserCharge: toLedger(sum(run.map((part) => part.advertiser_charge))),
+    segments: run.length,
+    visibility: first.visibility,
+    path: [first.from, ...run.map((part) => part.to)],
+  };
+}
+
 /** What a campaign has actually had driven for it, and what that costs. */
 export async function campaignTotals(
   campaignId: string,
@@ -1266,24 +1854,35 @@ export async function campaignTotals(
 /** The same, for many campaigns at once, so a list is one query. */
 export async function campaignTotalsFor(
   campaignIds: string[],
-): Promise<Map<string, { verifiedKm: number; spend: Money }>> {
-  const totals = new Map<string, { verifiedKm: number; spend: Money }>();
+): Promise<Map<string, { verifiedKm: number; spend: Money; impressions: number }>> {
+  const totals = new Map<string, { verifiedKm: number; spend: Money; impressions: number }>();
   if (campaignIds.length === 0) return totals;
 
+  // Same fill the impressions page does: a list opened before the worker has
+  // run would otherwise show verified kilometres and a literal zero audience.
+  for (const campaignId of campaignIds) {
+    await computeMissing(CURRENT_MODEL_VERSION, { campaignId });
+  }
+
   const rows = (await sequelize.query(
-    `SELECT campaign_id,
-            COALESCE(SUM(distance_km), 0)       AS km,
-            COALESCE(SUM(advertiser_charge), 0) AS charge
-       FROM trip_segments
-      WHERE campaign_id IN (:campaignIds) AND state = 'BILLABLE'
-      GROUP BY campaign_id`,
-    { replacements: { campaignIds }, type: 'SELECT' },
-  )) as { campaign_id: string; km: string; charge: string }[];
+    `SELECT s.campaign_id,
+            COALESCE(SUM(s.distance_km), 0)       AS km,
+            COALESCE(SUM(s.advertiser_charge), 0) AS charge,
+            COALESCE(SUM(si.impressions), 0)      AS impressions
+       FROM trip_segments s
+       LEFT JOIN segment_impressions si
+              ON si.segment_id = s.id
+             AND si.model_version = :version
+      WHERE s.campaign_id IN (:campaignIds) AND s.state = 'BILLABLE'
+      GROUP BY s.campaign_id`,
+    { replacements: { campaignIds, version: CURRENT_MODEL_VERSION }, type: 'SELECT' },
+  )) as { campaign_id: string; km: string; charge: string; impressions: string }[];
 
   for (const row of rows) {
     totals.set(row.campaign_id, {
       verifiedKm: asKm(row.km),
       spend: toLedger(money(row.charge)),
+      impressions: Math.round(Number(row.impressions)),
     });
   }
   return totals;
@@ -1294,6 +1893,20 @@ export async function achievedKmFor(input: {
   driverId: string;
   campaignId: string;
 }): Promise<number> {
+  return (await achievedFor(input)).km;
+}
+
+/**
+ * The same kilometres, and what they actually paid.
+ *
+ * The phone used to multiply kilometres by a headline rate and call that
+ * "earned". Zone mix and held ground make that a different number from the
+ * wallet, which is how Home and My Earnings disagreed about the same driving.
+ */
+export async function achievedFor(input: {
+  driverId: string;
+  campaignId: string;
+}): Promise<{ km: number; earnings: Money }> {
   const totals = await totalsFor('driver_id = :driverId AND campaign_id = :campaignId', input);
-  return asKm(totals.billableKm);
+  return { km: asKm(totals.billableKm), earnings: toPayable(money(totals.earnings)) };
 }

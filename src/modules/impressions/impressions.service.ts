@@ -81,6 +81,7 @@ const PENDING = `
      AND s.distance_km > 0
      AND s.ended_at > s.started_at
      AND si.segment_id IS NULL
+     AND (:campaignId::uuid IS NULL OR s.campaign_id = :campaignId)
    ORDER BY s.started_at
    LIMIT :limit
 `;
@@ -102,13 +103,19 @@ export interface ComputeResult {
  */
 export async function computeMissing(
   version: string = CURRENT_MODEL_VERSION,
+  scope: { campaignId?: string } = {},
 ): Promise<ComputeResult> {
   const coefficients = coefficientsFor(version);
   let computed = 0;
 
   for (;;) {
     const pending = (await sequelize.query(PENDING, {
-      replacements: { zone: IST, version, limit: BATCH_SIZE },
+      replacements: {
+        zone: IST,
+        version,
+        limit: BATCH_SIZE,
+        campaignId: scope.campaignId ?? null,
+      },
       type: 'SELECT',
     })) as PendingSegment[];
 
@@ -358,6 +365,14 @@ export async function forCampaign(
   version: string = CURRENT_MODEL_VERSION,
 ): Promise<CampaignImpressions> {
   coefficientsFor(version);
+  /*
+   * The worker is the bulk path. A GET that only reads would report a live
+   * campaign as empty whenever Redis is down or the nightly job has not run
+   * yet — which is every local `npm run dev`. Computing what is missing for
+   * this campaign is the same function the worker runs, and a second pass
+   * writes nothing.
+   */
+  await computeMissing(version, { campaignId: campaign.id });
 
   return {
     campaignId: campaign.id,
@@ -396,6 +411,7 @@ export async function forCampaignDay(
   version: string = CURRENT_MODEL_VERSION,
 ): Promise<CampaignDayImpressions> {
   const coefficients = coefficientsFor(version);
+  await computeMissing(version, { campaignId });
   const totals = await rollup(campaignId, date, version);
 
   const [speeds] = (await sequelize.query(

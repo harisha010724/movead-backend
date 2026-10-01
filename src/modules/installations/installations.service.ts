@@ -7,6 +7,7 @@ import { money, toLedger, toPayable } from '../../pricing/money';
 import { DRIVER_RATE } from '../../pricing/rates';
 import * as tracking from '../tracking/tracking.service';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import { campaignDateHasLapsed } from '../../shared/time';
 import * as audit from '../audit/audit.service';
 import { Campaign, type CampaignStatus } from '../campaigns/campaigns.model';
 import { Driver, Vehicle } from '../drivers/drivers.model';
@@ -440,7 +441,7 @@ export async function approveInstallation(input: {
     kind: 'CAMPAIGN',
     title: 'A vehicle is live',
     body: `A vehicle on “${campaign.name}” passed installation review and is now running.`,
-    href: '/campaigns',
+    href: `/campaigns/${campaign.id}`,
   });
 
   return toAssignmentView(await loadAssignment(assignment.id));
@@ -475,12 +476,22 @@ export async function rejectInstallation(input: {
     ip: input.actor.ip,
   });
 
+  const campaign = await loadCampaign(assignment.campaignId);
+
   await notifications.notifyDriver({
     driverId: assignment.driverId,
     kind: 'CAMPAIGN',
     title: 'Installation needs attention',
     body: input.reason,
     href: '/driver/campaign',
+  });
+
+  await notifications.notifyAdvertiserUsers({
+    advertiserId: campaign.advertiserId,
+    kind: 'CAMPAIGN',
+    title: 'A wrap needs attention',
+    body: `A vehicle on “${campaign.name}” did not pass installation review. ${input.reason}`,
+    href: `/campaigns/${campaign.id}`,
   });
 
   return toAssignmentView(await loadAssignment(assignment.id));
@@ -744,7 +755,7 @@ export async function driverCampaign(driverId: string): Promise<DriverCampaignVi
   const elapsedDays = clamp(daysBetween(start, new Date()) + 1, 0, totalDays);
 
   const targetKm = campaign.targetKm ? Number(campaign.targetKm) : 0;
-  const achievedKm = await tracking.achievedKmFor({ driverId, campaignId: campaign.id });
+  const achieved = await tracking.achievedFor({ driverId, campaignId: campaign.id });
 
   return {
     id: campaign.id,
@@ -753,7 +764,7 @@ export async function driverCampaign(driverId: string): Promise<DriverCampaignVi
     brandName: campaign.brandName,
     logoUrl: null,
     creativeUrl: campaign.creativeKey ? `/v1/driver/campaign/creative` : null,
-    status: assignment ? driverStatus(assignment.status, campaign.status) : 'requested',
+    status: assignment ? driverStatus(assignment.status, campaign) : 'requested',
     startDate: campaign.startDate,
     endDate: campaign.endDate,
     vehicleId: vehicle.id,
@@ -772,7 +783,8 @@ export async function driverCampaign(driverId: string): Promise<DriverCampaignVi
     elapsedDays,
     totalDays,
     daysLeft: Math.max(totalDays - elapsedDays, 0),
-    achievedKm,
+    achievedKm: achieved.km,
+    earned: achieved.earnings,
     terms: CAMPAIGN_TERMS,
     areas: campaign.locations.map((location) => ({
       id: location.id,
@@ -843,6 +855,8 @@ export interface DriverCampaignView {
   totalDays: number;
   daysLeft: number;
   achievedKm: number;
+  /** What those kilometres actually paid — not kilometres times a headline rate. */
+  earned: string;
   terms: string[];
   areas: { id: string; name: string; zone: string; polygon: { lat: number; lng: number }[] }[];
   installation: { status: string; scheduledFor: string | null; rejectionReason: string | null } | null;
@@ -874,13 +888,14 @@ const CAMPAIGN_OVERRIDES: Record<string, DriverCampaignView['status']> = {
 
 function driverStatus(
   assignment: AssignmentStatus,
-  campaign: string,
+  campaign: Campaign,
 ): DriverCampaignView['status'] {
-  const override = CAMPAIGN_OVERRIDES[campaign];
+  if (campaignDateHasLapsed(campaign.endDate)) return 'completed';
+  const override = CAMPAIGN_OVERRIDES[campaign.status];
   if (override) return override;
   if (assignment === 'ASSIGNED') return 'assigned';
   if (assignment === 'ACCEPTED' || assignment === 'INSTALLING') return 'installation_pending';
-  return campaign === 'ACTIVE' ? 'active' : 'installation_pending';
+  return campaign.status === 'ACTIVE' ? 'active' : 'installation_pending';
 }
 
 function polygonFor(campaign: Campaign, tier: string): { lat: number; lng: number }[] {

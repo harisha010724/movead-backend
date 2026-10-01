@@ -377,9 +377,9 @@ export async function livePositions(
  *
  * No acceptance criterion defines what one is — how many people see a wrapped
  * vehicle over a kilometre is a research question, not a measurement the
- * platform makes. `campaigns.service.ts` already reports `impressions: 0` for
- * the same reason, and the two must agree: a campaign row and the dashboard
- * above it citing different reach would be worse than citing none.
+ * platform makes. AC-24.9 keeps this dashboard KPI at zero. Campaign rows
+ * still carry the modelled figure from billed hops so the Campaigns table
+ * can show the same number as `/impressions`.
  *
  * The series are still returned, with real labels and zero values, so the
  * charts render axes rather than an error. Nothing in the pricing path may read

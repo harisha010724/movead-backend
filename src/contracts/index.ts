@@ -18,7 +18,9 @@ import './impressions';
 import './installations';
 import './invitations';
 import './notifications';
+import './reports';
 import './tracking';
+import './visibility';
 
 registry.registerComponent('securitySchemes', 'bearerAuth', {
   type: 'http',
@@ -112,6 +114,11 @@ export function buildOpenApiDocument() {
       {
         name: 'notifications',
         description: 'In-app inbox for the advertiser — campaign approval and rejection',
+      },
+      {
+        name: 'reports',
+        description:
+          'Advertiser exports: a dated campaign proof pack and the CSV extracts behind the same billed kilometres.',
       },
       {
         name: 'vehicles',

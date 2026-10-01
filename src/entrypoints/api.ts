@@ -17,6 +17,7 @@ import { adminDriverRoutes } from '../modules/drivers/drivers.routes';
 import { adminInstallationRoutes } from '../modules/installations/installations.routes';
 import { advertiserVehicleRoutes } from '../modules/drivers/vehicles.advertiser.routes';
 import { healthRoutes } from '../modules/health/health.routes';
+import { reportRoutes } from '../modules/reports/reports.routes';
 import {
   adminIdentityRoutes,
   authRoutes,
@@ -56,6 +57,7 @@ v1.use('/auth', authRoutes());
 v1.use('/invitations', invitationRoutes());
 v1.use('/campaigns', campaignRoutes());
 v1.use('/notifications', advertiserNotificationRoutes());
+v1.use('/reports', reportRoutes());
 
 // Before the advertiser fleet router, which guards everything under
 // `/vehicles` as an advertiser. The live map is read by operations too, and a

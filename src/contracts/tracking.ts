@@ -1,5 +1,6 @@
 import { commonErrorResponses, ErrorBodySchema, MoneySchema } from './common';
 import { registry, z } from './registry';
+import { VisibilityPlaceSchema } from './visibility';
 
 /**
  * Tracking — the driver's session, the fixes it uploads, and the totals read
@@ -199,6 +200,189 @@ export const TripFeedQuerySchema = z.object({
     .optional()
     .describe('Cursor: return trips that started strictly before this instant.'),
 });
+
+export const CampaignTripParamSchema = z.object({
+  id: z.uuid(),
+  tripId: z.uuid(),
+});
+
+export const CampaignTripQuerySchema = z.object({
+  driverId: z.uuid().optional().describe('Limit the list to one driver on this campaign.'),
+  q: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .describe('Match a plate or the trip date (IST). Spaces on the plate are ignored.'),
+  status: z
+    .enum(['verified', 'pending_review', 'rejected'])
+    .optional()
+    .describe('Limit the list to one trip status.'),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  before: z
+    .string()
+    .optional()
+    .describe('Deprecated cursor. Prefer `offset`. Return trips that started strictly before this instant.'),
+});
+
+export const CampaignRosterQuerySchema = z.object({
+  q: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .describe('Match a driver name or a vehicle registration, spaces ignored on the plate.'),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+export const CampaignDriverSchema = registry.register(
+  'CampaignDriver',
+  z.object({
+    id: z.uuid(),
+    name: z.string(),
+  }),
+);
+
+export const CampaignTripSchema = registry.register(
+  'CampaignTrip',
+  z.object({
+    id: z.uuid().describe("The drive's first segment, which is what names the trip."),
+    vehicleRegistration: z.string().describe('The plate that was carrying the wrap.'),
+    startedAt: z.string(),
+    endedAt: z.string(),
+    verifiedKm: z.number().describe('Billable kilometres only. Held distance is not counted here.'),
+    charge: MoneySchema.describe('What these kilometres cost the advertiser.'),
+    status: z.enum(['verified', 'pending_review', 'rejected']),
+    idleSecondsBefore: z
+      .number()
+      .int()
+      .nullable()
+      .describe('How long the vehicle stood still before this drive. Null when it opened a shift.'),
+    impressions: z
+      .number()
+      .int()
+      .describe(
+        'Modelled opportunities-to-see on the billed hops of this drive. Not a people count, and not a billing input.',
+      ),
+  }),
+);
+
+export const CampaignRosterDriverSchema = registry.register(
+  'CampaignRosterDriver',
+  z.object({
+    id: z.uuid(),
+    name: z.string(),
+    vehicleRegistration: z
+      .string()
+      .nullable()
+      .describe('The plate currently assigned, or the last one that drove this campaign.'),
+    area: z.string().nullable(),
+    verifiedKm: z.number().describe('Billable kilometres on this campaign. Held distance is not counted.'),
+    state: z
+      .enum(['RUNNING', 'IDLE', 'OFFLINE', 'GPS_PAUSED'])
+      .nullable()
+      .describe('Live state of the assigned vehicle. Null when nothing is assigned to read.'),
+  }),
+);
+
+export const CampaignRosterSchema = registry.register(
+  'CampaignRoster',
+  z.object({
+    drivers: z.array(CampaignRosterDriverSchema),
+    total: z.number().int().describe('How many drivers match the search, before this page is cut.'),
+    limit: z.number().int(),
+    offset: z.number().int(),
+  }),
+);
+
+export const CampaignTripsSchema = registry.register(
+  'CampaignTrips',
+  z.object({
+    drivers: z
+      .array(CampaignDriverSchema)
+      .describe('The roster for the driver picker. Not filtered when `driverId` is set.'),
+    trips: z.array(CampaignTripSchema).describe('Newest first.'),
+    total: z.number().int().describe('How many trips match the search and status, before this page is cut.'),
+    limit: z.number().int(),
+    offset: z.number().int(),
+    statusCounts: z.object({
+      all: z.number().int(),
+      verified: z.number().int(),
+      pending_review: z.number().int(),
+      rejected: z.number().int(),
+    }).describe('Counts after search, before the status filter, so the filter menu stays honest.'),
+    nextBefore: z
+      .string()
+      .nullable()
+      .describe('Deprecated. Pass back as `before` for the next page. Null at the end of the feed.'),
+  }),
+);
+
+export const CampaignTripLegSchema = registry.register(
+  'CampaignTripLeg',
+  z.object({
+    zone: z.enum(['prime', 'secondary', 'network']),
+    state: z.enum(['BILLABLE', 'PENDING_REVIEW', 'NON_BILLABLE']),
+    flagReason: z
+      .string()
+      .nullable()
+      .describe('Why this stretch has not been billed. Null unless it is held or refused.'),
+    startedAt: z.string(),
+    endedAt: z.string(),
+    distanceKm: z.number(),
+    advertiserRate: MoneySchema,
+    advertiserCharge: MoneySchema,
+    segments: z.number().int(),
+    visibility: z
+      .enum(['high', 'medium', 'low'])
+      .nullable()
+      .describe(
+        'How readable the wrap was on this stretch, from GPS speed. Null when the stretch is held, parked, or too short to classify. Not a billing input.',
+      ),
+    path: z
+      .array(z.object({ lat: z.number(), lng: z.number() }))
+      .describe('The line to draw, in order.'),
+  }),
+);
+
+export const CampaignParkedSchema = registry.register(
+  'CampaignParked',
+  z.object({
+    seconds: z.number().int().describe('How long it stood still before this drive began.'),
+    lat: z.number(),
+    lng: z.number(),
+  }),
+);
+
+export const CampaignTripDetailSchema = registry.register(
+  'CampaignTripDetail',
+  z.object({
+    id: z.uuid(),
+    vehicleRegistration: z.string(),
+    startedAt: z.string(),
+    endedAt: z.string().nullable().describe('Null while the trip is still running.'),
+    distanceKm: z.number(),
+    advertiserCharge: MoneySchema,
+    status: z.enum(['verified', 'pending_review', 'rejected']),
+    legs: z
+      .array(CampaignTripLegSchema)
+      .describe(
+        'Consecutive stretches agreeing on zone, state, reason and visibility, merged into one run each. Held stretches are included so the map accounts for every kilometre driven, not only the billed ones. The admin audit of the same trip still merges on zone only.',
+      ),
+    places: z
+      .array(VisibilityPlaceSchema)
+      .describe(
+        'Readable dwells on this trip, pinned on the map. GPS clusters first; OpenStreetMap may rename a cluster as a signal, mall, station or apartment. Not a billing input.',
+      ),
+    parked: CampaignParkedSchema
+      .nullable()
+      .describe(
+        'Where the vehicle stood still before this drive. Null on the first drive of a shift — that gap is off duty, not a park.',
+      ),
+  }),
+);
 
 export const DriverTripLegSchema = registry.register(
   'DriverTripLeg',
@@ -545,5 +729,82 @@ registry.registerPath({
     400: commonErrorResponses[400],
     401: commonErrorResponses[401],
     404: { description: 'No such session for this driver.', content: json(ErrorBodySchema) },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/campaigns/{id}/drivers',
+  tags: ['campaigns'],
+  summary: 'Who is carrying this campaign',
+  description: [
+    'The roster an advertiser sees on the campaign page: assigned drivers, and anyone who has already driven it.',
+    '',
+    '`q` matches a driver name or a plate. The list is paged with `limit` and `offset`, because a roster is stable enough to count.',
+    '',
+    'Scoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.',
+  ].join('\n'),
+  security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+  request: { params: z.object({ id: z.uuid() }), query: CampaignRosterQuerySchema },
+  responses: {
+    200: {
+      description: 'A page of drivers. An empty list when nobody is on the campaign yet.',
+      content: json(CampaignRosterSchema),
+    },
+    400: commonErrorResponses[400],
+    401: commonErrorResponses[401],
+    403: { description: 'Not an advertiser account.', content: json(ErrorBodySchema) },
+    404: { description: 'No such campaign for this advertiser.', content: json(ErrorBodySchema) },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/campaigns/{id}/trips',
+  tags: ['campaigns'],
+  summary: 'Trips recorded while carrying this campaign',
+  description: [
+    'Every drive the fleet recorded under this campaign, newest first.',
+    '',
+    'A trip is a journey between two stops, the same cut the driver app collects — not a press of Start, and not a priced segment. The most recent one is what an advertiser opening the campaign expects to see on the map.',
+    '',
+    'Carries the advertiser charge and the plate, and nothing about the driver or what they earned. The admin audit of the same segments sits behind its own permission for that reason.',
+    '',
+    'Scoped to the signed-in advertiser. A campaign belonging to someone else is not found rather than forbidden.',
+  ].join('\n'),
+  security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+  request: { params: z.object({ id: z.uuid() }), query: CampaignTripQuerySchema },
+  responses: {
+    200: {
+      description: 'A page of trips. An empty list for a campaign that has not been driven yet.',
+      content: json(CampaignTripsSchema),
+    },
+    400: commonErrorResponses[400],
+    401: commonErrorResponses[401],
+    403: { description: 'Not an advertiser account.', content: json(ErrorBodySchema) },
+    404: { description: 'No such campaign for this advertiser.', content: json(ErrorBodySchema) },
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/campaigns/{id}/trips/{tripId}',
+  tags: ['campaigns'],
+  summary: 'One campaign trip, opened up',
+  description: [
+    'Where one of the campaign\'s trips actually ran, coloured by the zone each stretch was classified into, or by how readable the wrap was.',
+    '',
+    'Returned as runs rather than raw segments. Consecutive segments agreeing on zone, state, reason and visibility are the same fact about the journey, so they are merged and counted. A Prime stretch that crawls then flies is two runs, because those are two different claims about whether anyone could read the wrap.',
+    '',
+    'The driver\'s rate and earning are not on the legs. Asking for a trip that is not this campaign\'s is not found, the same as a trip that does not exist.',
+  ].join('\n'),
+  security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+  request: { params: CampaignTripParamSchema },
+  responses: {
+    200: { description: 'The trip.', content: json(CampaignTripDetailSchema) },
+    400: commonErrorResponses[400],
+    401: commonErrorResponses[401],
+    403: { description: 'Not an advertiser account.', content: json(ErrorBodySchema) },
+    404: { description: 'No such trip on this campaign.', content: json(ErrorBodySchema) },
   },
 });

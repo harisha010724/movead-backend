@@ -4,6 +4,7 @@ import { Op } from 'sequelize';
 
 import { money, toLedger, toPayable } from '../../pricing/money';
 import { ADVERTISER_RATE } from '../../pricing/rates';
+import { campaignDateHasLapsed, effectiveCampaignStatus } from '../../shared/time';
 import * as tracking from '../tracking/tracking.service';
 import {
   BadRequestError,
@@ -184,6 +185,13 @@ export async function createForAdvertiser(input: {
     title: 'New campaign awaiting review',
     body: `${advertiser?.brandName ?? 'An advertiser'} submitted “${created.name}”.`,
     href: '/campaign-review',
+  });
+  await notifications.notifyAdvertiserUsers({
+    advertiserId: input.advertiserId,
+    kind: 'CAMPAIGN',
+    title: 'We have your campaign',
+    body: `“${created.name}” is with operations. Review usually takes one working day.`,
+    href: `/campaigns/${created.id}`,
   });
 
   return withTotal(toView(created));
@@ -497,7 +505,7 @@ async function runStep(step: Step, input: StepInput): Promise<AdminCampaignView>
     advertiserId: row.advertiserId,
     kind: 'CAMPAIGN',
     ...step.advertiser(row, reason),
-    href: '/campaigns',
+    href: `/campaigns/${row.id}`,
   });
 
   if (step.driver) {
@@ -875,7 +883,7 @@ function toView(row: Campaign): CampaignView {
     id: row.id,
     name: row.name,
     brandName: row.brandName,
-    status: row.status,
+    status: effectiveCampaignStatus(row.status, String(row.endDate).slice(0, 10)),
     city: row.city,
     vehicleType: row.vehicleType,
     startDate: String(row.startDate).slice(0, 10),
@@ -914,7 +922,7 @@ async function withTotals<T extends CampaignView>(views: T[]): Promise<T[]> {
   if (views.length === 0) return views;
   const totals = await tracking.campaignTotalsFor(views.map((view) => view.id));
 
-  return views.map((view) => {
+  const updated = views.map((view) => {
     const total = totals.get(view.id);
     if (!total) return view;
 
@@ -922,10 +930,56 @@ async function withTotals<T extends CampaignView>(views: T[]): Promise<T[]> {
     return {
       ...view,
       verifiedKm: total.verifiedKm,
+      impressions: total.impressions,
       spent: toPayable(spent),
       remaining: toPayable(money(view.budget).minus(spent)),
     };
   });
+
+  await maybeWarnBudgets(views, totals);
+  return updated;
+}
+
+const BUDGET_WARN_SHARE = 0.8;
+
+/**
+ * One inbox row when a live campaign has used 80% of its budget.
+ *
+ * Spend is the sum of billed kilometres, not `spent_amount`. The warning is
+ * written at most once per campaign so opening the list cannot flood the inbox.
+ */
+async function maybeWarnBudgets(
+  views: CampaignView[],
+  totals: Map<string, { verifiedKm: number; spend: string; impressions: number }>,
+): Promise<void> {
+  const hot = views.filter((view) => {
+    const total = totals.get(view.id);
+    if (!total) return false;
+    if (campaignDateHasLapsed(view.endDate)) return false;
+    const budget = money(view.budget);
+    return budget.gt(0) && money(total.spend).div(budget).gte(BUDGET_WARN_SHARE);
+  });
+  if (hot.length === 0) return;
+
+  const rows = await Campaign.findAll({
+    where: {
+      id: hot.map((view) => view.id),
+      status: { [Op.in]: ['ACTIVE', 'BUDGET_WARNING'] },
+    },
+    attributes: ['id', 'advertiserId', 'name'],
+  });
+
+  await Promise.all(
+    rows.map((row) =>
+      notifications.notifyAdvertiserOnce({
+        advertiserId: row.advertiserId,
+        kind: 'CAMPAIGN',
+        title: 'Campaign budget running low',
+        body: `“${row.name}” has used 80% of its budget. What remains is still billed from verified kilometres.`,
+        href: `/campaigns/${row.id}`,
+      }),
+    ),
+  );
 }
 
 async function withTotal<T extends CampaignView>(view: T): Promise<T> {

@@ -75,7 +75,7 @@ const CAMPAIGN = {
   city: 'Bengaluru',
   vehicleType: 'CAB',
   startDate: '2026-09-01',
-  endDate: '2026-09-30',
+  endDate: '2026-12-31',
   zonePrimeKm: '4000',
   zoneSecondaryKm: '15000',
   zonePolygons: { prime: { path: PRIME_BOX }, secondary: { path: SECONDARY_BOX } },
@@ -393,7 +393,12 @@ describe('zone classification and pricing (AC-13, AC-14, AC-15, AC-21)', () => {
     const advertiser = await advertiserPortal();
     const campaign = await advertiser.get(`/v1/campaigns/${campaignId}`).expect(200);
     expect(campaign.body.verifiedKm).toBeCloseTo(2.8, 1);
+    expect(campaign.body.impressions).toBeGreaterThan(0);
     expect(Number(campaign.body.spent)).toBeCloseTo(6.11, 1);
+
+    const listed = await advertiser.get('/v1/campaigns').expect(200);
+    const row = listed.body.items.find((item: { id: string }) => item.id === campaignId);
+    expect(row?.impressions).toBe(campaign.body.impressions);
 
     // AC-00: every rupee above is a sum of rows that each name their own GPS.
     const rows = await segments('true');
@@ -1550,6 +1555,17 @@ describe('what the advertiser is shown', () => {
     return { advertiser: await advertiserPortal(), campaignId };
   }
 
+  it('models the audience on the first read if the worker has not run', async () => {
+    const { driver, sessionId, campaignId } = await runningSession();
+    await upload(driver, sessionId, straightRun());
+
+    const advertiser = await advertiserPortal();
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/impressions`).expect(200);
+
+    expect(body.verifiedKm).toBeGreaterThan(0);
+    expect(body.impressions).toBeGreaterThan(0);
+  });
+
   it('reports the audience beside the distance it was derived from', async () => {
     const { advertiser, campaignId } = await aDrivenCampaign();
 
@@ -1648,6 +1664,371 @@ describe('what the advertiser is shown', () => {
   it('is closed to a caller who is not signed in', async () => {
     const { campaignId } = await aDrivenCampaign();
     await client().get(`/v1/campaigns/${campaignId}/impressions`).expect(401);
+  });
+
+  it('lists the trip the driver just recorded, newest first', async () => {
+    const { driver, campaignId } = await runningSession();
+    const [older, newer] = await twoTrips(driver);
+    const advertiser = await advertiserPortal();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+
+    expect(body.trips.map((trip: { id: string }) => trip.id)).toEqual([newer, older]);
+    expect(body.trips[0]).toMatchObject({
+      id: newer,
+      status: 'verified',
+    });
+    expect(body.trips[0]?.vehicleRegistration).toMatch(/^[A-Z0-9]+$/);
+    expect(body.trips[0]?.verifiedKm).toBeGreaterThan(0);
+    expect(Number(body.trips[0]?.charge)).toBeGreaterThan(0);
+    expect(body.trips[0]?.impressions).toBeGreaterThan(0);
+    expect(body.drivers).toEqual([{ id: expect.any(String), name: DRIVER.name }]);
+    expect(body.nextBefore).toBeNull();
+  });
+
+  it('lists the campaign roster with the plate and verified kilometres', async () => {
+    const { campaignId } = await runningSession();
+    const advertiser = await advertiserPortal();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/drivers`).expect(200);
+
+    expect(body.total).toBe(1);
+    expect(body.offset).toBe(0);
+    expect(body.drivers).toHaveLength(1);
+    expect(body.drivers[0]).toMatchObject({
+      id: expect.any(String),
+      name: DRIVER.name,
+      vehicleRegistration: expect.stringMatching(/^[A-Z0-9]+$/),
+    });
+    expect(body.drivers[0]?.verifiedKm).toBeGreaterThanOrEqual(0);
+  });
+
+  it('searches the roster by driver name or plate', async () => {
+    const { campaignId } = await runningSession();
+    const advertiser = await advertiserPortal();
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/drivers`).expect(200);
+    const plate = String(listed.body.drivers[0]?.vehicleRegistration ?? '');
+
+    const byName = await advertiser
+      .get(`/v1/campaigns/${campaignId}/drivers`)
+      .query({ q: 'rahul' })
+      .expect(200);
+    expect(byName.body.drivers).toHaveLength(1);
+
+    const byPlate = await advertiser
+      .get(`/v1/campaigns/${campaignId}/drivers`)
+      .query({ q: plate.slice(0, 4) })
+      .expect(200);
+    expect(byPlate.body.drivers).toHaveLength(1);
+
+    const none = await advertiser
+      .get(`/v1/campaigns/${campaignId}/drivers`)
+      .query({ q: 'nobody-on-this-campaign' })
+      .expect(200);
+    expect(none.body.drivers).toEqual([]);
+    expect(none.body.total).toBe(0);
+  });
+
+  it('pages the roster without repeating a driver', async () => {
+    const { campaignId } = await runningSession();
+    const advertiser = await advertiserPortal();
+
+    const first = await advertiser
+      .get(`/v1/campaigns/${campaignId}/drivers`)
+      .query({ limit: 1, offset: 0 })
+      .expect(200);
+    expect(first.body.drivers).toHaveLength(1);
+    expect(first.body.total).toBe(1);
+
+    const second = await advertiser
+      .get(`/v1/campaigns/${campaignId}/drivers`)
+      .query({ limit: 1, offset: 1 })
+      .expect(200);
+    expect(second.body.drivers).toEqual([]);
+    expect(second.body.total).toBe(1);
+  });
+
+  it('does not list drivers on a campaign the advertiser does not own', async () => {
+    await runningSession();
+    const advertiser = await advertiserPortal();
+    await advertiser.get(`/v1/campaigns/${randomUUID()}/drivers`).expect(404);
+  });
+
+  it('is closed to a caller who is not signed in, for the roster', async () => {
+    const { campaignId } = await runningSession();
+    await client().get(`/v1/campaigns/${campaignId}/drivers`).expect(401);
+  });
+
+  it('filters the list to one driver when asked', async () => {
+    const { driver, campaignId, driverId } = await runningSession();
+    await twoTrips(driver);
+    const advertiser = await advertiserPortal();
+
+    const mine = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ driverId })
+      .expect(200);
+    expect(mine.body.trips).toHaveLength(2);
+
+    const none = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ driverId: randomUUID() })
+      .expect(200);
+    expect(none.body.trips).toEqual([]);
+    expect(none.body.drivers).toEqual([{ id: driverId, name: DRIVER.name }]);
+  });
+
+  it('pages campaign trips on start time, without repeating a trip', async () => {
+    const { driver, campaignId } = await runningSession();
+    const [older, newer] = await twoTrips(driver);
+    const advertiser = await advertiserPortal();
+
+    const first = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).query({ limit: 1 }).expect(200);
+    expect(first.body.trips.map((trip: { id: string }) => trip.id)).toEqual([newer]);
+    expect(first.body.total).toBe(2);
+    expect(first.body.offset).toBe(0);
+
+    const second = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ limit: 1, offset: 1 })
+      .expect(200);
+    expect(second.body.trips.map((trip: { id: string }) => trip.id)).toEqual([older]);
+    expect(second.body.total).toBe(2);
+    expect(second.body.nextBefore).toBeNull();
+  });
+
+  it('searches and filters campaign trips on the server', async () => {
+    const { driver, campaignId } = await runningSession();
+    await twoTrips(driver);
+    const advertiser = await advertiserPortal();
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+    const plate = String(listed.body.trips[0]?.vehicleRegistration ?? '');
+
+    const byPlate = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ q: plate.slice(0, 4) })
+      .expect(200);
+    expect(byPlate.body.trips.length).toBeGreaterThan(0);
+    expect(byPlate.body.statusCounts.all).toBe(listed.body.total);
+
+    const none = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ q: 'NO-SUCH-PLATE' })
+      .expect(200);
+    expect(none.body.trips).toEqual([]);
+    expect(none.body.total).toBe(0);
+
+    const verified = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips`)
+      .query({ status: 'verified' })
+      .expect(200);
+    expect(verified.body.trips.every((trip: { status: string }) => trip.status === 'verified')).toBe(true);
+  });
+
+  it('opens a trip onto the ground it was driven on', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+    const tripId = String(listed.body.trips[0]?.id);
+
+    const { body } = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips/${tripId}`)
+      .expect(200);
+
+    expect(body.id).toBe(tripId);
+    expect(body.distanceKm).toBe(listed.body.trips[0]?.verifiedKm);
+    expect(body.advertiserCharge).toBe(listed.body.trips[0]?.charge);
+    expect(body.legs.length).toBeGreaterThan(0);
+    expect(body.legs[0]?.path.length).toBeGreaterThan(1);
+    expect(body.parked).toBeNull();
+  });
+
+  /**
+   * Asserted against the serialised body rather than against named fields,
+   * because the failure being guarded is a field nobody meant to add.
+   */
+  it('tells the advertiser nothing about the driver or what they earned', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+    const tripId = String(listed.body.trips[0]?.id);
+    const opened = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips/${tripId}`)
+      .expect(200);
+
+    const raw = JSON.stringify(listed.body) + JSON.stringify(opened.body);
+
+    expect(listed.body.drivers).toEqual([{ id: expect.any(String), name: DRIVER.name }]);
+    expect(raw).not.toContain(DRIVER.mobile);
+    expect(raw).not.toMatch(/earning/i);
+  });
+
+  it('answers a campaign that has not been driven with an empty list', async () => {
+    const { campaignId } = await runningSession();
+    const advertiser = await advertiserPortal();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+
+    expect(body.trips).toEqual([]);
+    expect(body.nextBefore).toBeNull();
+    expect(body.drivers).toEqual([{ id: expect.any(String), name: DRIVER.name }]);
+  });
+
+  it('does not open a trip that is not this campaign\'s', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    await advertiser.get(`/v1/campaigns/${campaignId}/trips/${randomUUID()}`).expect(404);
+  });
+
+  it('does not list trips for a campaign the advertiser does not own', async () => {
+    await aDrivenCampaign();
+    const advertiser = await advertiserPortal();
+
+    await advertiser.get(`/v1/campaigns/${randomUUID()}/trips`).expect(404);
+  });
+
+  it('is closed to a caller who is not signed in, for the trips as well', async () => {
+    const { campaignId } = await aDrivenCampaign();
+    await client().get(`/v1/campaigns/${campaignId}/trips`).expect(401);
+  });
+
+  /**
+   * Visibility is a read of the same segments, not a second price. The
+   * default run here is ~33 km/h through Prime — city traffic, so medium —
+   * and the charge on the trip is unchanged from the list.
+   */
+  it('bands the campaign\'s kilometres by how readable the wrap was', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/visibility`).expect(200);
+
+    expect(body).toMatchObject({
+      campaignId,
+      version: 'v1.0.0',
+      bands: { high: '<15 km/h', medium: '15–35 km/h', low: '>35 km/h' },
+    });
+    expect(body.mediumKm).toBeGreaterThan(0);
+    expect(body.highKm).toBe(0);
+    expect(body.lowKm).toBe(0);
+    expect(body.classifiedKm).toBe(body.highKm + body.mediumKm + body.lowKm);
+    expect(body.highShare).toBe(0);
+    expect(Array.isArray(body.places)).toBe(true);
+    expect(Array.isArray(body.byKind)).toBe(true);
+    expect(body.when.windows).toEqual({
+      morning: '07:00–11:00 IST',
+      midday: '11:00–17:00 IST',
+      evening: '17:00–21:00 IST',
+      night: '21:00–07:00 IST',
+    });
+    expect(body.when.readableKm).toBe(body.highKm + body.mediumKm);
+    expect(
+      body.when.morningKm + body.when.middayKm + body.when.eveningKm + body.when.nightKm,
+    ).toBeCloseTo(body.when.readableKm, 1);
+  });
+
+  it('counts a crawl as high visibility, not as a parked vehicle', async () => {
+    const { driver, sessionId, campaignId } = await runningSession();
+    await upload(driver, sessionId, crawlRun());
+    const advertiser = await advertiserPortal();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/visibility`).expect(200);
+
+    expect(body.highKm).toBeGreaterThan(0);
+    expect(body.mediumKm).toBe(0);
+    expect(body.lowKm).toBe(0);
+    expect(body.highShare).toBe(1);
+    expect(body.when.readableKm).toBe(body.highKm);
+    expect(body.places.length).toBeGreaterThan(0);
+    expect(
+      body.places.every(
+        (place: { kind: string; source: string }) =>
+          place.kind === 'junction' && place.source === 'gps',
+      ),
+    ).toBe(true);
+  });
+
+  it('opens a campaign trip with a visibility band on each billed stretch', async () => {
+    const { advertiser, campaignId } = await aDrivenCampaign();
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+    const tripId = String(listed.body.trips[0]?.id);
+
+    const { body } = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips/${tripId}`)
+      .expect(200);
+
+    expect(body.advertiserCharge).toBe(listed.body.trips[0]?.charge);
+    expect(body.legs.length).toBeGreaterThan(0);
+    expect(body.legs.every((leg: { visibility: string | null; state: string }) =>
+      leg.state === 'BILLABLE' ? leg.visibility === 'medium' : leg.visibility === null,
+    )).toBe(true);
+    expect(Array.isArray(body.places)).toBe(true);
+    expect(body.parked).toBeNull();
+  });
+
+  it('pins where the vehicle stood still before the next drive', async () => {
+    const { driver, sessionId, campaignId } = await runningSession();
+    await shiftWithAStop(driver, sessionId);
+    const advertiser = await advertiserPortal();
+
+    const listed = await advertiser.get(`/v1/campaigns/${campaignId}/trips`).expect(200);
+    const first = listed.body.trips.find(
+      (trip: { idleSecondsBefore: number | null }) => trip.idleSecondsBefore === null,
+    );
+    const second = listed.body.trips.find(
+      (trip: { idleSecondsBefore: number | null }) => trip.idleSecondsBefore != null,
+    );
+
+    expect(second?.idleSecondsBefore).toBe(PARKED_SECONDS - 90);
+
+    const openedFirst = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips/${String(first?.id)}`)
+      .expect(200);
+    expect(openedFirst.body.parked).toBeNull();
+
+    const openedSecond = await advertiser
+      .get(`/v1/campaigns/${campaignId}/trips/${String(second?.id)}`)
+      .expect(200);
+    expect(openedSecond.body.parked).toMatchObject({
+      seconds: PARKED_SECONDS - 90,
+      lat: 12.979,
+      lng: 77.61,
+    });
+  });
+
+  it('answers a campaign that has not been driven with an empty mix', async () => {
+    const { campaignId } = await runningSession();
+    const advertiser = await advertiserPortal();
+
+    const { body } = await advertiser.get(`/v1/campaigns/${campaignId}/visibility`).expect(200);
+
+    expect(body).toMatchObject({
+      campaignId,
+      highKm: 0,
+      mediumKm: 0,
+      lowKm: 0,
+      classifiedKm: 0,
+      highShare: 0,
+      places: [],
+      byKind: [],
+      when: {
+        morningKm: 0,
+        middayKm: 0,
+        eveningKm: 0,
+        nightKm: 0,
+        readableKm: 0,
+        peakShare: 0,
+      },
+    });
+  });
+
+  it('does not answer visibility for a campaign the advertiser does not own', async () => {
+    await aDrivenCampaign();
+    const advertiser = await advertiserPortal();
+
+    await advertiser.get(`/v1/campaigns/${randomUUID()}/visibility`).expect(404);
+  });
+
+  it('is closed to a caller who is not signed in, for visibility as well', async () => {
+    const { campaignId } = await aDrivenCampaign();
+    await client().get(`/v1/campaigns/${campaignId}/visibility`).expect(401);
   });
 });
 
@@ -1936,6 +2317,16 @@ async function shiftWithAStop(driver: Agent, sessionId: string) {
 function straightRun(offsetSeconds = 0, from?: Date) {
   return [12.9715, 12.974, 12.9765, 12.979].map((lat, index) =>
     fix({ lat, seconds: offsetSeconds + index * 30, ...(from ? { from } : {}) }),
+  );
+}
+
+/**
+ * The same climb, held to a crawl: ~11 km/h, inside the high-visibility band
+ * and inside the 120 s bridge window, so the pairs are priced rather than dropped.
+ */
+function crawlRun(offsetSeconds = 0, from?: Date) {
+  return [12.9715, 12.974, 12.9765, 12.979].map((lat, index) =>
+    fix({ lat, seconds: offsetSeconds + index * 90, ...(from ? { from } : {}) }),
   );
 }
 

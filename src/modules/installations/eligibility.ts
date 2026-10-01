@@ -1,5 +1,6 @@
 import { Op } from 'sequelize';
 
+import { campaignDateHasLapsed } from '../../shared/time';
 import { Campaign } from '../campaigns/campaigns.model';
 import { Driver, DriverConsent, Vehicle } from '../drivers/drivers.model';
 
@@ -53,6 +54,8 @@ export async function eligibility(driverId: string): Promise<Eligibility> {
     order: [['recordedAt', 'DESC']],
   });
   const consented = consent?.action === 'GRANTED';
+  const campaignRunning =
+    campaign?.status === 'ACTIVE' && !campaignDateHasLapsed(campaign.endDate);
 
   const vehicleApproved = Boolean(
     vehicle &&
@@ -100,12 +103,13 @@ export async function eligibility(driverId: string): Promise<Eligibility> {
     {
       id: 'ad_installed',
       label: 'Advertisement installed',
-      passed: assignment?.status === 'ACTIVE' && campaign?.status === 'ACTIVE',
+      passed: assignment?.status === 'ACTIVE' && campaignRunning,
       remedy: adInstalledRemedy(
         campaign?.status ?? null,
         assignment?.status ?? null,
         installation?.status ?? null,
         installation?.rejectionReason ?? null,
+        campaign?.endDate ?? null,
       ),
     },
   ];
@@ -128,12 +132,18 @@ function adInstalledRemedy(
   assignmentStatus: string | null,
   installationStatus: string | null,
   rejectionReason: string | null,
+  endDate: string | null,
 ): string | null {
-  if (assignmentStatus === 'ACTIVE' && campaignStatus === 'ACTIVE') return null;
+  const finished =
+    campaignStatus === 'COMPLETED' ||
+    campaignStatus === 'STOPPED' ||
+    (endDate !== null && campaignDateHasLapsed(endDate));
 
-  if (campaignStatus === 'PAUSED') return 'The campaign is paused.';
-  if (campaignStatus === 'COMPLETED' || campaignStatus === 'STOPPED') {
-    return 'The campaign has finished.';
+  if (assignmentStatus === 'ACTIVE' && campaignStatus === 'ACTIVE' && !finished) return null;
+
+  if (campaignStatus === 'PAUSED' && !finished) return 'The campaign is paused.';
+  if (finished) {
+    return 'The campaign has finished. Tracking starts again when a new campaign is assigned.';
   }
   if (installationStatus === 'REJECTED') {
     return rejectionReason ?? 'The wrap has to be fitted again.';

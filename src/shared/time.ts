@@ -14,6 +14,42 @@
 
 export const IST = 'Asia/Kolkata';
 
+const IST_OFFSET_MS = (5 * 60 + 30) * 60_000;
+
+/** `YYYY-MM-DD` — the Indian calendar day an instant falls on. */
+export function todayIst(at: Date = new Date()): string {
+  return new Date(at.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * The last campaign day is inclusive. After that Indian date the flight is
+ * over, even if nobody has pressed Complete yet.
+ */
+export function campaignDateHasLapsed(endDate: string, at: Date = new Date()): boolean {
+  return todayIst(at) > String(endDate).slice(0, 10);
+}
+
+/**
+ * A running campaign whose last Indian day has passed reads as completed.
+ *
+ * The stored row stays where it is so a GET cannot fire complete() side
+ * effects (vehicle release, inbox flood). Only live-looking statuses lapse;
+ * a brief still in review stays in review even if the printed dates are old.
+ */
+export function effectiveCampaignStatus<T extends string>(
+  status: T,
+  endDate: string,
+  at: Date = new Date(),
+): T | 'COMPLETED' {
+  if (
+    (status === 'ACTIVE' || status === 'PAUSED' || status === 'BUDGET_WARNING') &&
+    campaignDateHasLapsed(endDate, at)
+  ) {
+    return 'COMPLETED';
+  }
+  return status;
+}
+
 /**
  * The civil date a timestamp column falls on.
  *

@@ -53,6 +53,28 @@ export async function notifyStaff(input: {
  * Fan-out to every active login on the advertiser account. Same rule as
  * staff: a missed inbox must not roll back approve or reject.
  */
+/**
+ * Same fan-out, but only the first time this title and link are written.
+ *
+ * A budget warning that fired on every campaign GET would bury the inbox.
+ * The title-and-href pair is the identity of the event, so a later spend
+ * tick does not mint a second copy.
+ */
+export async function notifyAdvertiserOnce(input: {
+  advertiserId: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  href: string;
+}): Promise<void> {
+  const existing = await AppNotification.findOne({
+    where: { href: input.href, title: input.title },
+    attributes: ['id'],
+  });
+  if (existing) return;
+  await notifyAdvertiserUsers(input);
+}
+
 export async function notifyAdvertiserUsers(input: {
   advertiserId: string;
   kind: NotificationKind;

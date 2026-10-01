@@ -151,6 +151,9 @@ export const DriverCampaignSchema = registry.register(
     totalDays: z.int(),
     daysLeft: z.int(),
     achievedKm: z.number(),
+    earned: MoneySchema.describe(
+      'What the verified kilometres on this campaign actually paid the driver.',
+    ),
     terms: z.array(z.string()),
     areas: z.array(
       z.object({

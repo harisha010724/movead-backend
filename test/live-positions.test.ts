@@ -28,7 +28,7 @@ const CAMPAIGN = {
   city: 'Bengaluru',
   vehicleType: 'CAB',
   startDate: '2026-09-01',
-  endDate: '2026-09-30',
+  endDate: '2026-12-31',
   zonePrimeKm: '4000',
   zoneSecondaryKm: '15000',
   zonePolygons: { prime: { path: PRIME_BOX } },

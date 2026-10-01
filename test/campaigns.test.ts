@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type TestContext } from 'vitest';
 
 import { pingDatabase, sequelize } from '../src/db/sequelize';
+import { Campaign } from '../src/modules/campaigns/campaigns.model';
 import type { VehicleStatus } from '../src/modules/drivers/drivers.model';
 
 import { type Agent, client, signIn } from './helpers/admin';
@@ -116,6 +117,31 @@ describe('advertiser campaigns', () => {
     expect(list.body.total).toBe(1);
     expect(list.body.items[0].id).toBe(created.body.id);
     expect(list.body.items[0].name).toBe('Summer Sale');
+  });
+
+  it('reads a running campaign as completed after its last day', async () => {
+    const portal = await signInAdvertiser();
+    const created = await portal.post('/v1/campaigns').send({
+      ...DRAFT,
+      name: 'ABC Summer',
+      startDate: '2026-09-19',
+      endDate: '2026-09-30',
+    }).expect(201);
+
+    await Campaign.update(
+      { status: 'ACTIVE', startDate: '2026-09-19', endDate: '2026-09-30' },
+      { where: { id: created.body.id } },
+    );
+
+    const list = await portal.get('/v1/campaigns').expect(200);
+    expect(list.body.items[0]).toMatchObject({
+      id: created.body.id,
+      name: 'ABC Summer',
+      status: 'COMPLETED',
+    });
+
+    const opened = await portal.get(`/v1/campaigns/${created.body.id}`).expect(200);
+    expect(opened.body.status).toBe('COMPLETED');
   });
 
   it('stores a creative under the signed-in user and attaches it on submit', async () => {
@@ -597,22 +623,33 @@ describe('admin campaign review', () => {
     await admin.post(`/v1/admin/campaigns/${id}/approve`).expect(200);
   });
 
+  it('notifies the advertiser when they submit a campaign', async () => {
+    const { portal, id } = await submittedCampaign();
+
+    const inbox = await portal.get('/v1/notifications').expect(200);
+    expect(inbox.body.unreadCount).toBe(1);
+    expect(inbox.body.items[0].title).toMatch(/have your campaign/i);
+    expect(inbox.body.items[0].href).toBe(`/campaigns/${id}`);
+    expect(inbox.body.items[0].body).toMatch(/Summer Sale/);
+  });
+
   it('notifies the advertiser when operations approve a campaign', async () => {
     const { admin, portal, id } = await submittedCampaign();
 
     const before = await portal.get('/v1/notifications').expect(200);
-    expect(before.body.unreadCount).toBe(0);
+    expect(before.body.unreadCount).toBe(1);
+    expect(before.body.items[0].title).toMatch(/have your campaign/i);
 
     await admin.post(`/v1/admin/campaigns/${id}/approve`).expect(200);
 
     const inbox = await portal.get('/v1/notifications').expect(200);
-    expect(inbox.body.unreadCount).toBe(1);
-    expect(inbox.body.items[0].kind).toBe('CAMPAIGN');
-    expect(inbox.body.items[0].title).toMatch(/approved/i);
-    expect(inbox.body.items[0].href).toBe('/campaigns');
-    expect(inbox.body.items[0].body).toMatch(/Summer Sale/);
+    expect(inbox.body.unreadCount).toBe(2);
+    const approved = inbox.body.items.find((item: { title: string }) => /approved/i.test(item.title));
+    expect(approved?.kind).toBe('CAMPAIGN');
+    expect(approved?.href).toBe(`/campaigns/${id}`);
+    expect(approved?.body).toMatch(/Summer Sale/);
 
-    await portal.post(`/v1/notifications/${inbox.body.items[0].id}/read`).expect(200);
+    await portal.post('/v1/notifications/read-all').expect(200);
     const after = await portal.get('/v1/notifications').expect(200);
     expect(after.body.unreadCount).toBe(0);
   });
@@ -626,10 +663,10 @@ describe('admin campaign review', () => {
       .expect(200);
 
     const inbox = await portal.get('/v1/notifications').expect(200);
-    expect(inbox.body.unreadCount).toBe(1);
+    expect(inbox.body.unreadCount).toBe(2);
     expect(inbox.body.items[0].title).toMatch(/not approved/i);
     expect(inbox.body.items[0].body).toMatch(/wrap dimensions/);
-    expect(inbox.body.items[0].href).toBe('/campaigns');
+    expect(inbox.body.items[0].href).toBe(`/campaigns/${id}`);
   });
 
   it('moves an approved campaign to installing once print is received', async () => {
