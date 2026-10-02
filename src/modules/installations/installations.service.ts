@@ -47,6 +47,13 @@ const ACCEPTED_PHOTO_TYPES = {
   'image/webp': 'webp',
 } as const;
 
+const FINISHED_CAMPAIGN: CampaignStatus[] = ['COMPLETED', 'STOPPED', 'CANCELLED'];
+
+/** A hold that should no longer block a new assignment. */
+function assignmentHoldHasEnded(campaign: Campaign): boolean {
+  return FINISHED_CAMPAIGN.includes(campaign.status) || campaignDateHasLapsed(campaign.endDate);
+}
+
 /** Campaign statuses from which a vehicle may be assigned. */
 const ASSIGNABLE_CAMPAIGN = new Set(['APPROVED', 'AWAITING_INSTALLATION', 'ACTIVE']);
 
@@ -146,9 +153,25 @@ export async function assignVehicles(input: {
 
       if (live) {
         if (live.campaignId === campaign.id) continue; // Already on this campaign.
-        throw new ConflictError(
-          `${vehicle.registrationNumber} is already on another live campaign.`,
-        );
+        const prior = await Campaign.findByPk(live.campaignId, { transaction });
+        // Date-ended or finished campaigns still hold a LIVE row until someone
+        // presses Complete. That is not a second advertiser on the same kilometre
+        // — the unique index would treat it as one — so end the hold here and
+        // let the new assignment through.
+        if (prior && assignmentHoldHasEnded(prior)) {
+          await live.update(
+            {
+              status: 'ENDED',
+              endedAt: new Date(),
+              endReason: 'The campaign’s last day has passed.',
+            },
+            { transaction },
+          );
+        } else {
+          throw new ConflictError(
+            `${vehicle.registrationNumber} is already on another live campaign.`,
+          );
+        }
       }
 
       const assignment = await CampaignVehicle.create(
@@ -668,8 +691,6 @@ const CLOSING_VIEW_DAYS = 14;
  * it, and showing it to them would misrepresent somebody else's live campaign
  * as theirs.
  */
-const FINISHED_CAMPAIGN = ['COMPLETED', 'STOPPED', 'CANCELLED'];
-
 async function closedCampaign(driverId: string): Promise<DriverCampaignContext | null> {
   const since = new Date(Date.now() - CLOSING_VIEW_DAYS * 24 * 60 * 60 * 1000);
 

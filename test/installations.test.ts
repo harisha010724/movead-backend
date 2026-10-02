@@ -137,6 +137,23 @@ describe('assigning a vehicle to a campaign (AC-22)', () => {
     expect(clash.body.message).toMatch(/already on another live campaign/i);
   });
 
+  it('assigns a vehicle whose previous campaign has already ended', async () => {
+    const { campaignId, vehicleId } = await assignedVehicleWithDriver();
+    await Campaign.update(
+      { startDate: '2026-08-01', endDate: '2026-08-31' },
+      { where: { id: campaignId } },
+    );
+    const next = await approvedCampaign('ABC Summer 1');
+
+    const assigned = await admin
+      .post(`/v1/admin/campaigns/${next}/vehicles`)
+      .send({ vehicleIds: [vehicleId] })
+      .expect(201);
+
+    expect(assigned.body).toHaveLength(1);
+    expect(assigned.body[0]).toMatchObject({ status: 'ASSIGNED', vehicleId });
+  });
+
   /* AC-22.2 and AC-22.3: a failing vehicle needs a stated reason, not a click. */
   it('refuses an unapproved vehicle unless a reason is given', async () => {
     const campaignId = await approvedCampaign();
