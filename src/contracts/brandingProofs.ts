@@ -172,7 +172,7 @@ registry.registerPath({
   tags: ['driver-portal'],
   summary: 'Upload one wrap photo',
   description:
-    'Multipart `file` plus `angle`, `lat`, `lon` and `capturedAt` query parameters. Location is taken from the request, not from the file.',
+    'Multipart `file` plus `angle`, `lat`, `lon` and `capturedAt` as form fields (query parameters still accepted). Location is taken from the request, not from the file.',
   security: [{ bearerAuth: [] }],
   request: { params: IdParamSchema },
   responses: {

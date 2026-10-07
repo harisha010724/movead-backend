@@ -124,6 +124,22 @@ describe('wrap-photo checks', () => {
     await admin.post(`/v1/admin/assignments/${assignmentId}/branding-proofs`).expect(409);
   });
 
+  it('accepts wrap-photo metadata as multipart fields', async () => {
+    const { driver } = await liveVehicle();
+    const current = await driver.get('/v1/driver/branding-proof').expect(200);
+
+    const stored = await driver
+      .post(`/v1/driver/branding-proofs/${current.body.id}/photos`)
+      .field('angle', 'FRONT')
+      .field('lat', '12.9716')
+      .field('lon', '77.5946')
+      .field('capturedAt', new Date().toISOString())
+      .attach('file', PNG, { filename: 'front.png', contentType: 'image/png' })
+      .expect(201);
+
+    expect(stored.body.uploaded).toContain('FRONT');
+  });
+
   it('publishes photos to the advertiser without an admin decision', async () => {
     const { driver, advertiser, campaignId, assignmentId } = await liveVehicle();
     const current = await driver.get('/v1/driver/branding-proof').expect(200);

@@ -52,6 +52,21 @@ export function parseQuery<T extends z.ZodType>(req: Request, schema: T): z.infe
   return parse(schema, req.query, 'query');
 }
 
+/**
+ * Multipart uploads put text fields on `req.body` after multer, while the
+ * same values may also arrive as query parameters. Phones send the former;
+ * either shape is accepted.
+ */
+export function parseQueryOrBody<T extends z.ZodType>(req: Request, schema: T): z.infer<T> {
+  const query = isPlainRecord(req.query) ? req.query : {};
+  const body = isPlainRecord(req.body) ? req.body : {};
+  return parse(schema, { ...query, ...body }, 'query');
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function parseParams<T extends z.ZodType>(req: Request, schema: T): z.infer<T> {
   return parse(schema, req.params, 'params');
 }

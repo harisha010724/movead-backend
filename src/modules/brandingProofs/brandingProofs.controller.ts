@@ -7,7 +7,7 @@ import {
 } from '../../contracts/brandingProofs';
 import { BadRequestError } from '../../shared/errors';
 import { currentUser } from '../../shared/http/middleware/auth';
-import { parseParams, parseQuery } from '../../shared/http/validate';
+import { parseParams, parseQueryOrBody } from '../../shared/http/validate';
 
 import * as proofs from './brandingProofs.service';
 
@@ -56,7 +56,7 @@ export async function start(req: Request, res: Response): Promise<void> {
 
 export async function uploadPhoto(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
-  const query = parseQuery(req, BrandingPhotoQuerySchema);
+  const query = parseQueryOrBody(req, BrandingPhotoQuerySchema);
   const file = req.file;
   if (!file) throw new BadRequestError('Attach a photo.');
 
