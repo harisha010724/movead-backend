@@ -7666,6 +7666,52 @@
         }
       }
     },
+    "/v1/driver/branding-proofs": {
+      "post": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "Start a wrap-photo set",
+        "description": "The driver opens the camera flow. Returns the open check, or starts one on their live assignment.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The open or newly started check.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingProof"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No live campaign.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/driver/branding-proofs/{id}/submit": {
       "post": {
         "tags": [

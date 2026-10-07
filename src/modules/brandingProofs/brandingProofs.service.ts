@@ -74,6 +74,7 @@ export interface ProofView {
 export async function requestProof(input: {
   assignmentId: string;
   actor: Actor | null;
+  notify?: boolean;
 }): Promise<ProofView> {
   const assignment = await loadAssignment(input.assignmentId);
   if (assignment.status !== 'ACTIVE') {
@@ -96,15 +97,35 @@ export async function requestProof(input: {
 
   const campaign = await Campaign.findByPk(assignment.campaignId);
 
-  await notifications.notifyDriver({
-    driverId: assignment.driverId,
-    kind: 'VERIFICATION',
-    title: 'Photograph your wrap',
-    body: `Take photos of the advertisement on your vehicle for “${campaign?.name ?? 'your campaign'}”. Camera only — gallery shots are not accepted.`,
-    href: '/driver/branding-proof',
-  });
+  if (input.notify !== false) {
+    await notifications.notifyDriver({
+      driverId: assignment.driverId,
+      kind: 'VERIFICATION',
+      title: 'Photograph your wrap',
+      body: `Take photos of the advertisement on your vehicle for “${campaign?.name ?? 'your campaign'}”. Camera only — gallery shots are not accepted.`,
+      href: '/driver/branding-proof',
+    });
+  }
 
   return toView(proof.id);
+}
+
+/** The driver opens wrap photos themselves. Returns the open check, or starts one. */
+export async function startForDriver(driverId: string): Promise<ProofView> {
+  const assignment = await CampaignVehicle.findOne({
+    where: { driverId, status: 'ACTIVE' },
+  });
+  if (!assignment) {
+    throw new ConflictError('Wrap photos can only be taken while you have a live campaign.');
+  }
+
+  const existing = await BrandingProof.findOne({
+    where: { campaignVehicleId: assignment.id, status: { [Op.in]: OPEN_PROOF } },
+    order: [['requestedAt', 'DESC']],
+  });
+  if (existing) return toView(existing.id);
+
+  return requestProof({ assignmentId: assignment.id, actor: null, notify: false });
 }
 
 /** Opens a check if none is open. Used when a vehicle first goes live. */

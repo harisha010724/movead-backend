@@ -142,6 +142,23 @@ describe('wrap-photo checks', () => {
     expect(again.body.status).toBe('REQUESTED');
     expect((await driver.get('/v1/driver/eligibility').expect(200)).body.eligible).toBe(true);
   });
+
+  it('lets the driver start a wrap-photo set without waiting for operations', async () => {
+    const { driver } = await liveVehicle();
+    const first = await driver.get('/v1/driver/branding-proof').expect(200);
+    const started = await driver.post('/v1/driver/branding-proofs').expect(201);
+    expect(started.body.id).toBe(first.body.id);
+    expect(started.body.status).toBe('REQUESTED');
+
+    for (const angle of started.body.required as string[]) {
+      await uploadWrap(driver, started.body.id, angle);
+    }
+    await driver.post(`/v1/driver/branding-proofs/${started.body.id}/submit`).expect(200);
+
+    const next = await driver.post('/v1/driver/branding-proofs').expect(201);
+    expect(next.body.id).not.toBe(started.body.id);
+    expect(next.body.status).toBe('REQUESTED');
+  });
 });
 
 async function liveVehicle(): Promise<{

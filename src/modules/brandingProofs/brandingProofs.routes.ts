@@ -62,6 +62,7 @@ export function driverBrandingProofRoutes(): Router {
   const router = Router();
 
   router.get('/branding-proof', controller.current);
+  router.post('/branding-proofs', controller.start);
   router.post('/branding-proofs/:id/photos', singlePhoto, controller.uploadPhoto);
   router.post('/branding-proofs/:id/submit', controller.submit);
   router.get('/branding-proof-photos/:photoId', controller.driverPhoto);

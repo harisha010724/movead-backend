@@ -184,6 +184,20 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'post',
+  path: '/v1/driver/branding-proofs',
+  tags: ['driver-portal'],
+  summary: 'Start a wrap-photo set',
+  description: 'The driver opens the camera flow. Returns the open check, or starts one on their live assignment.',
+  security: [{ bearerAuth: [] }],
+  responses: {
+    201: { description: 'The open or newly started check.', content: json(BrandingProofSchema) },
+    409: { description: 'No live campaign.', content: json(ErrorBodySchema) },
+    401: commonErrorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: 'post',
   path: '/v1/driver/branding-proofs/{id}/submit',
   tags: ['driver-portal'],
   summary: 'Publish wrap photos to the advertiser',

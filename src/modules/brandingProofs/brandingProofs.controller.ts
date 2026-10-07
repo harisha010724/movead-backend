@@ -50,6 +50,10 @@ export async function current(req: Request, res: Response): Promise<void> {
   res.json(await proofs.currentForDriver(requireDriverId(req)));
 }
 
+export async function start(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await proofs.startForDriver(requireDriverId(req)));
+}
+
 export async function uploadPhoto(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
   const query = parseQuery(req, BrandingPhotoQuerySchema);
