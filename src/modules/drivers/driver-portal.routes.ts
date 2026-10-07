@@ -3,6 +3,7 @@ import multer from 'multer';
 
 import { BadRequestError } from '../../shared/errors';
 import { requireAuth } from '../../shared/http/middleware/auth';
+import { driverBrandingProofRoutes } from '../brandingProofs/brandingProofs.routes';
 import * as installations from '../installations/installations.controller';
 import * as notifications from '../notifications/notifications.controller';
 import * as tracking from '../tracking/tracking.controller';
@@ -124,6 +125,8 @@ export function driverPortalRoutes(): Router {
   router.get('/campaign/creative', installations.driverCreative);
   router.post('/assignments/:id/accept', installations.driverAccept);
   router.get('/eligibility', installations.driverEligibility);
+
+  router.use(driverBrandingProofRoutes());
 
   router.get('/documents', controller.portalDocuments);
   router.post('/documents', singleDocument, controller.portalUploadDocument);

@@ -27,6 +27,7 @@ const PRIME_BOX = [
 const CAMPAIGN = {
   city: 'Bengaluru',
   vehicleType: 'CAB',
+  adDimension: 'WRAP_180',
   startDate: '2026-09-01',
   endDate: '2026-12-31',
   zonePrimeKm: '4000',
@@ -286,6 +287,43 @@ describe('finding a vehicle by its number', () => {
   });
 });
 
+describe('plotting a vehicle that is not currently tracking', () => {
+  /*
+   * Idle is "no active session", not "no place on the map". The dashboard
+   * counts that vehicle as idle either way; dropping it from live-positions
+   * because GPS only joined the live session left the map empty while the
+   * overlay still said Idle 1.
+   */
+  it('keeps an idle vehicle at its last fix after the session ends', async () => {
+    const zephyr = await trackingFleet(ZEPHYR);
+    await zephyr.driver.delete('/v1/driver/tracking/session').send({}).expect(200);
+
+    const map = await zephyr.advertiser.get('/v1/vehicles/live-positions').expect(200);
+
+    expect(map.body.items).toHaveLength(1);
+    expect(map.body.items[0]).toMatchObject({
+      vehicleRef: ZEPHYR.registration,
+      state: 'IDLE',
+    });
+    expect(Number(map.body.items[0].lat)).toBeCloseTo(12.979, 2);
+    expect(Number(map.body.items[0].lon)).toBeCloseTo(77.61, 2);
+  });
+
+  it('plots an assigned vehicle that has never tracked at the driver pin', async () => {
+    const zephyr = await assignedFleet(ZEPHYR);
+
+    const map = await zephyr.advertiser.get('/v1/vehicles/live-positions').expect(200);
+
+    expect(map.body.items).toHaveLength(1);
+    expect(map.body.items[0]).toMatchObject({
+      vehicleRef: ZEPHYR.registration,
+      state: 'IDLE',
+    });
+    expect(Number(map.body.items[0].lat)).toBeCloseTo(12.9756, 3);
+    expect(Number(map.body.items[0].lon)).toBeCloseTo(77.6069, 3);
+  });
+});
+
 // ------------------------------------------------------------------ fixtures
 
 function plates(response: { body: { items: { vehicleRef: string }[] } }): string[] {
@@ -302,6 +340,22 @@ interface Fixture {
 
 /** An advertiser, a live campaign, and a driver mid-session reporting fixes. */
 async function trackingFleet(
+  fixture: Fixture,
+): Promise<{ advertiser: Agent; driver: Agent; campaignId: string }> {
+  const fleet = await assignedFleet(fixture);
+  const session = await fleet.driver.post('/v1/driver/tracking/session').send({}).expect(200);
+
+  // Last-known position still comes from these points after the session ends.
+  await fleet.driver
+    .post('/v1/driver/tracking/points')
+    .send({ sessionId: String(session.body.id), points: northboundRun() })
+    .expect(200);
+
+  return fleet;
+}
+
+/** Assigned and installed, but the driver has not started tracking. */
+async function assignedFleet(
   fixture: Fixture,
 ): Promise<{ advertiser: Agent; driver: Agent; campaignId: string }> {
   const advertiser = await signInAdvertiser(fixture);
@@ -336,17 +390,7 @@ async function trackingFleet(
   await admin.post(`/v1/admin/assignments/${assignmentId}/submit`).expect(200);
   await (await secondAdmin()).post(`/v1/admin/assignments/${assignmentId}/approve`).expect(200);
 
-  const driver = await signInDriver(fixture);
-  const session = await driver.post('/v1/driver/tracking/session').send({}).expect(200);
-
-  // Without a fix there is no position, and a vehicle with no position is not
-  // on the map — so every assertion about the map needs points uploaded first.
-  await driver
-    .post('/v1/driver/tracking/points')
-    .send({ sessionId: String(session.body.id), points: northboundRun() })
-    .expect(200);
-
-  return { advertiser, driver, campaignId };
+  return { advertiser, driver: await signInDriver(fixture), campaignId };
 }
 
 /** Four fixes climbing through the Prime box, ending near 12.979. */

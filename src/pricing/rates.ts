@@ -10,9 +10,11 @@ import type { Money } from './money';
  * change to one side is a silent change to the margin, and the number that
  * moved is in a different file from the number that should have moved with it.
  *
- * Rates are platform-fixed for the pilot and are not advertiser-editable
- * (AC-02.3). They are written onto each segment as it is priced, so a later
- * change cannot reprice a kilometre already driven (AC-14.4, AC-15.6).
+ * These constants are the platform default. Admin can override them per
+ * advertiser (`rate.change`); advertisers cannot. The numbers in force for a
+ * campaign are snapshotted at create and written onto each segment as it is
+ * priced, so a later card change cannot reprice a kilometre already driven
+ * (AC-14.4, AC-15.6).
  */
 
 export type PricingZone = 'prime' | 'secondary' | 'network';

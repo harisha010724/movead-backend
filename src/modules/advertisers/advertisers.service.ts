@@ -10,6 +10,8 @@ import * as identityRepo from '../identity/identity.repository';
 import * as invitations from '../invitations/invitations.service';
 
 import { Advertiser, type AdvertiserStatus } from './advertisers.model';
+import * as rateCards from './rateCards.service';
+import type { RateCardView } from './rateCards.service';
 
 /**
  * Advertiser onboarding, admin side.
@@ -47,6 +49,8 @@ export interface AdvertiserView {
   createdAt: string;
   /** The first portal login, when the account has one. */
   primaryUser: AdvertiserUserView | null;
+  /** Current ₹/km card. Platform default until admin sets a custom one. */
+  rateCard: RateCardView;
 }
 
 export interface AdvertiserUserView {
@@ -216,16 +220,25 @@ export async function updateAdvertiser(input: {
     });
   }
 
-  const primaries = await identityRepo.primaryUsersFor([advertiser.id]);
-  return view(advertiser, primaries.get(advertiser.id) ?? null);
+  const [primaries, rateCard] = await Promise.all([
+    identityRepo.primaryUsersFor([advertiser.id]),
+    rateCards.currentFor(advertiser.id),
+  ]);
+  return view(advertiser, primaries.get(advertiser.id) ?? null, rateCard);
 }
 
 export async function listAdvertisers(): Promise<AdvertiserView[]> {
   const rows = await Advertiser.findAll({ order: [['createdAt', 'DESC']], limit: 200 });
   if (rows.length === 0) return [];
 
-  const primaries = await identityRepo.primaryUsersFor(rows.map((row) => row.id));
-  return rows.map((row) => view(row, primaries.get(row.id) ?? null));
+  const ids = rows.map((row) => row.id);
+  const [primaries, cards] = await Promise.all([
+    identityRepo.primaryUsersFor(ids),
+    rateCards.latestByAdvertiserIds(ids),
+  ]);
+  return rows.map((row) =>
+    view(row, primaries.get(row.id) ?? null, rateCards.viewFromCard(cards.get(row.id) ?? null)),
+  );
 }
 
 /**
@@ -390,7 +403,11 @@ function userView(invited: InvitedUser): AdvertiserUserView {
   };
 }
 
-function view(row: Advertiser, primaryUser: AdvertiserUserView | null): AdvertiserView {
+function view(
+  row: Advertiser,
+  primaryUser: AdvertiserUserView | null,
+  rateCard: RateCardView = rateCards.viewFromCard(null),
+): AdvertiserView {
   return {
     id: row.id,
     legalName: row.legalName,
@@ -401,5 +418,6 @@ function view(row: Advertiser, primaryUser: AdvertiserUserView | null): Advertis
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     primaryUser,
+    rateCard,
   };
 }

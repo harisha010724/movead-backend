@@ -50,6 +50,7 @@ const CAMPAIGN = {
   brandName: 'Zephyr',
   city: 'Bengaluru',
   vehicleType: 'CAB',
+  adDimension: 'WRAP_180',
   startDate: '2026-09-01',
   endDate: '2026-12-31',
   zonePrimeKm: '4000',

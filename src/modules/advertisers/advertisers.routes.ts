@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { requireAuth, requirePermission } from '../../shared/http/middleware/auth';
 
 import * as controller from './advertisers.controller';
+import './rateCards.model';
 
 /**
  * Advertiser onboarding, mounted at `/v1/admin`.
@@ -20,6 +21,16 @@ export function adminAdvertiserRoutes(): Router {
   // Correcting an account is the same authority as opening one, as with drivers.
   // Whoever can put a company on the platform can fix what they typed.
   router.patch('/advertisers/:id', requirePermission('advertiser.create'), controller.update);
+  router.get(
+    '/advertisers/:id/rate-card',
+    requirePermission('advertiser.read'),
+    controller.getRateCard,
+  );
+  router.put(
+    '/advertisers/:id/rate-card',
+    requirePermission('rate.change'),
+    controller.putRateCard,
+  );
   router.post('/advertisers/:id/users', requirePermission('user.create'), controller.createUser);
 
   return router;

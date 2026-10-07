@@ -127,7 +127,7 @@ export const VehicleSchema = registry.register(
     id: z.uuid(),
     driverId: z.uuid(),
     registrationNumber: z.string(),
-    category: z.enum(['AUTO', 'CAB']),
+    category: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']),
     bodyType: z.string().nullable(),
     makeModel: z.string().nullable(),
     colour: z.string().nullable(),
@@ -191,7 +191,7 @@ export const AddVehicleSchema = registry.register(
   'AddVehicleRequest',
   z.object({
     registrationNumber: RegistrationSchema,
-    category: z.enum(['AUTO', 'CAB']),
+    category: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']),
     bodyType: z.string().min(2).max(60).nullish(),
     makeModel: z.string().min(2).max(80).nullish(),
     colour: z.string().min(2).max(40).nullish(),
@@ -254,7 +254,7 @@ export const UpdateVehicleSchema = registry.register(
   'UpdateVehicleRequest',
   z.object({
     registrationNumber: RegistrationSchema.optional(),
-    category: z.enum(['AUTO', 'CAB']).optional(),
+    category: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']).optional(),
     bodyType: z.string().min(2).max(60).nullish(),
     makeModel: z.string().min(2).max(80).nullish(),
     colour: z.string().min(2).max(40).nullish(),
@@ -349,7 +349,7 @@ export const DriverListItemSchema = registry.register(
       .object({
         id: z.uuid(),
         registrationNumber: z.string(),
-        category: z.enum(['AUTO', 'CAB']),
+        category: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']),
         status: VehicleStatusSchema,
       })
       .nullable()
@@ -867,7 +867,7 @@ export const DriverProfileSchema = registry.register(
     vehicle: z
       .object({
         registrationNumber: RegistrationSchema,
-        category: z.enum(['CAB', 'AUTO']),
+        category: z.enum(['CAB', 'AUTO', 'BUS', 'TRUCK', 'TEMPO']),
         makeModel: z.string(),
       })
       .nullable(),
@@ -1056,7 +1056,7 @@ export const DriverVehicleSchema = registry.register(
   z.object({
     id: z.uuid(),
     registrationNumber: RegistrationSchema,
-    category: z.enum(['AUTO', 'CAB']),
+    category: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']),
     status: DriverVehicleStatusSchema,
     statusReason: z
       .string()
@@ -1257,14 +1257,14 @@ registry.registerPath({
 });
 
 export const AvailableFleetQuerySchema = z.object({
-  vehicleType: z.enum(['CAB', 'AUTO']).optional(),
+  vehicleType: z.enum(['CAB', 'AUTO', 'BUS', 'TRUCK', 'TEMPO']).optional(),
 });
 
 export const AvailableFleetVehicleSchema = registry.register(
   'AvailableFleetVehicle',
   z.object({
     id: z.uuid(),
-    vehicleType: z.enum(['CAB', 'AUTO']),
+    vehicleType: z.enum(['CAB', 'AUTO', 'BUS', 'TRUCK', 'TEMPO']),
     publicRef: z.string().describe('A stable, opaque reference kept alongside the plate.'),
     registrationNumber: z.string().describe('The plate. Shown to every audience — see AC-22.4.'),
     areaLabel: z.string(),

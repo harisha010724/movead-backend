@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
 import { amountFor } from '../src/pricing/money';
+import { driverRatesFrom } from '../src/pricing/rateCards';
 import { ADVERTISER_RATE, DRIVER_RATE, DRIVER_SHARE, type PricingZone } from '../src/pricing/rates';
 
 /**
@@ -56,5 +57,14 @@ describe('the rate card', () => {
       .plus(amountFor('3', ADVERTISER_RATE.prime));
 
     expect(charge.toFixed(2)).toBe('44.00');
+  });
+
+  it('keeps the 60% share when an advertiser is on a custom card', () => {
+    const advertiser = { prime: '4.0000', secondary: '1.5000', network: '0.8000' };
+    expect(driverRatesFrom(advertiser)).toEqual({
+      prime: '2.4000',
+      secondary: '0.9000',
+      network: '0.4800',
+    });
   });
 });

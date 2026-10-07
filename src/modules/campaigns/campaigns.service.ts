@@ -4,6 +4,8 @@ import { Op } from 'sequelize';
 
 import { money, toLedger, toPayable } from '../../pricing/money';
 import { ADVERTISER_RATE } from '../../pricing/rates';
+import type { ZoneRateMap } from '../../pricing/rateCards';
+import * as rateCards from '../advertisers/rateCards.service';
 import { campaignDateHasLapsed, effectiveCampaignStatus } from '../../shared/time';
 import * as tracking from '../tracking/tracking.service';
 import {
@@ -16,6 +18,7 @@ import * as audit from '../audit/audit.service';
 import { Advertiser } from '../advertisers/advertisers.model';
 import * as notifications from '../notifications/notifications.service';
 import { Vehicle } from '../drivers/drivers.model';
+import * as brandingProofs from '../brandingProofs/brandingProofs.service';
 import { CampaignVehicle, LIVE_ASSIGNMENT } from '../installations/installations.model';
 import { objectStore } from '../storage';
 
@@ -26,6 +29,7 @@ import {
   type CampaignVehicleType,
   type ZonePolygons,
 } from './campaigns.model';
+import { isAdDimensionFor } from './vehicleCatalog';
 
 /** Advertiser can still change the brief before operations has approved it. */
 const EDITABLE_STATUSES = new Set<CampaignStatus>([
@@ -41,12 +45,6 @@ const ACCEPTED_TYPES = {
   'application/pdf': 'pdf',
 } as const;
 
-/** Pilot rates per verified km, charged to the advertiser (₹5 / ₹2 / ₹1). */
-const ADVERTISER_RATES = {
-  prime: money(ADVERTISER_RATE.prime),
-  secondary: money(ADVERTISER_RATE.secondary),
-  network: money(ADVERTISER_RATE.network),
-};
 const KM_PER_VEHICLE_DAY = 80;
 
 export interface CampaignView {
@@ -56,6 +54,7 @@ export interface CampaignView {
   status: string;
   city: string;
   vehicleType: CampaignVehicleType;
+  adDimension: string | null;
   startDate: string;
   endDate: string;
   budget: string;
@@ -70,6 +69,7 @@ export interface CampaignView {
   zonePolygons: ZonePolygons;
   requestedVehicleIds: string[];
   targetKm: string | null;
+  rateCard: { prime: string; secondary: string; network: string };
   creativeKey: string | null;
   creativeFileName: string | null;
   vehicleCount: number;
@@ -119,6 +119,7 @@ export async function createForAdvertiser(input: {
   brandName: string;
   city: string;
   vehicleType: CampaignVehicleType;
+  adDimension: string;
   startDate: string;
   endDate: string;
   zonePrimeKm?: string;
@@ -131,7 +132,9 @@ export async function createForAdvertiser(input: {
   ip: string | null;
 }): Promise<CampaignView> {
   assertDates(input.startDate, input.endDate);
-  const zones = zoneBudgets(input);
+  assertAdDimension(input.vehicleType, input.adDimension);
+  const rates = await rateCards.currentRates(input.advertiserId);
+  const zones = zoneBudgets(input, rates);
 
   const requestedVehicleIds = await assertRequestedVehicles(
     input.requestedVehicleIds ?? [],
@@ -149,6 +152,7 @@ export async function createForAdvertiser(input: {
     brandName: input.brandName,
     city: input.city,
     vehicleType: input.vehicleType,
+    adDimension: input.adDimension,
     startDate: input.startDate,
     endDate: input.endDate,
     budgetAmount: toLedger(zones.budget),
@@ -158,6 +162,9 @@ export async function createForAdvertiser(input: {
     zoneBudgetNetwork: toLedger(money(0)),
     zoneKmPrime: toLedger(zones.primeKm),
     zoneKmSecondary: toLedger(zones.secondaryKm),
+    ratePrime: toLedger(money(rates.prime)),
+    rateSecondary: toLedger(money(rates.secondary)),
+    rateNetwork: toLedger(money(rates.network)),
     locations: input.locations ?? [],
     zonePolygons: input.zonePolygons ?? {},
     requestedVehicleIds,
@@ -212,6 +219,7 @@ export async function updateForAdvertiser(input: {
   brandName: string;
   city: string;
   vehicleType: CampaignVehicleType;
+  adDimension: string;
   startDate: string;
   endDate: string;
   zonePrimeKm?: string;
@@ -229,7 +237,8 @@ export async function updateForAdvertiser(input: {
   }
 
   assertDates(input.startDate, input.endDate);
-  const zones = zoneBudgets(input);
+  assertAdDimension(input.vehicleType, input.adDimension);
+  const zones = zoneBudgets(input, rateCards.ratesFromCampaign(row));
 
   const requestedVehicleIds = await assertRequestedVehicles(
     input.requestedVehicleIds ?? [],
@@ -246,6 +255,7 @@ export async function updateForAdvertiser(input: {
     brandName: input.brandName,
     city: input.city,
     vehicleType: input.vehicleType,
+    adDimension: input.adDimension,
     startDate: input.startDate,
     endDate: input.endDate,
     budgetAmount: toLedger(zones.budget),
@@ -638,6 +648,12 @@ export async function markInstalledForAdmin(input: {
     },
   );
 
+  const live = await CampaignVehicle.findAll({
+    where: { campaignId: input.id, status: 'ACTIVE' },
+    attributes: ['id'],
+  });
+  await Promise.all(live.map((row) => brandingProofs.requestIfNone(row.id)));
+
   return view;
 }
 
@@ -720,20 +736,23 @@ async function loadOwned(advertiserId: string, id: string): Promise<Campaign> {
   return row;
 }
 
-export function estimate(input: {
+export async function estimate(input: {
+  advertiserId: string;
   startDate: string;
   endDate: string;
   zonePrimeKm?: string;
   zoneSecondaryKm?: string;
-}): {
+}): Promise<{
   budget: string;
   estimatedKm: { prime: number; secondary: number; network: number };
   estimatedSpend: { prime: string; secondary: string; network: string; total: string };
   estimatedVehicles: number;
   estimatedDays: number;
-} {
+  rates: { prime: string; secondary: string; network: string };
+}> {
   assertDates(input.startDate, input.endDate);
-  const zones = zoneBudgets(input);
+  const rates = await rateCards.currentRates(input.advertiserId);
+  const zones = zoneBudgets(input, rates);
   if (zones.budget.lte(0)) {
     throw new BadRequestError('Enter kilometres in Prime or Secondary.');
   }
@@ -762,6 +781,11 @@ export function estimate(input: {
     },
     estimatedVehicles: vehicles,
     estimatedDays: days,
+    rates: {
+      prime: toLedger(money(rates.prime)),
+      secondary: toLedger(money(rates.secondary)),
+      network: toLedger(money(rates.network)),
+    },
   };
 }
 
@@ -844,6 +868,12 @@ async function assertRequestedVehicles(
   return unique;
 }
 
+function assertAdDimension(vehicleType: CampaignVehicleType, adDimension: string): void {
+  if (!isAdDimensionFor(vehicleType, adDimension)) {
+    throw new BadRequestError('Select an ad size that fits this vehicle.');
+  }
+}
+
 function assertDates(startDate: string, endDate: string): void {
   if (endDate < startDate) {
     throw new BadRequestError('End date cannot be before the start date.');
@@ -859,14 +889,17 @@ function inclusiveDays(startDate: string, endDate: string): number {
   );
 }
 
-function zoneBudgets(input: { zonePrimeKm?: string; zoneSecondaryKm?: string }) {
+function zoneBudgets(
+  input: { zonePrimeKm?: string; zoneSecondaryKm?: string },
+  rates: ZoneRateMap,
+) {
   const primeKm = money(input.zonePrimeKm || 0);
   const secondaryKm = money(input.zoneSecondaryKm || 0);
   if (primeKm.lt(0) || secondaryKm.lt(0)) {
     throw new BadRequestError('Zone kilometres cannot be negative.');
   }
-  const prime = primeKm.times(ADVERTISER_RATES.prime);
-  const secondary = secondaryKm.times(ADVERTISER_RATES.secondary);
+  const prime = primeKm.times(money(rates.prime));
+  const secondary = secondaryKm.times(money(rates.secondary));
   return {
     primeKm,
     secondaryKm,
@@ -886,6 +919,7 @@ function toView(row: Campaign): CampaignView {
     status: effectiveCampaignStatus(row.status, String(row.endDate).slice(0, 10)),
     city: row.city,
     vehicleType: row.vehicleType,
+    adDimension: row.adDimension,
     startDate: String(row.startDate).slice(0, 10),
     endDate: String(row.endDate).slice(0, 10),
     budget: toPayable(budget),
@@ -900,6 +934,11 @@ function toView(row: Campaign): CampaignView {
     zonePolygons: row.zonePolygons ?? {},
     requestedVehicleIds: row.requestedVehicleIds ?? [],
     targetKm: row.targetKm,
+    rateCard: {
+      prime: toLedger(money(row.ratePrime ?? ADVERTISER_RATE.prime)),
+      secondary: toLedger(money(row.rateSecondary ?? ADVERTISER_RATE.secondary)),
+      network: toLedger(money(row.rateNetwork ?? ADVERTISER_RATE.network)),
+    },
     creativeKey: row.creativeKey,
     creativeFileName: row.creativeFileName,
     vehicleCount: (row.requestedVehicleIds ?? []).length,

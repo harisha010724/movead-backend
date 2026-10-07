@@ -50,9 +50,11 @@ const GPS_SILENCE_MINUTES = 10;
 /**
  * The live fleet, one row per assigned vehicle, with its last known fix.
  *
- * `OFFLINE` vehicles keep their last position rather than being dropped: where
- * a vehicle stopped reporting is the first thing anyone asks, and a row that
- * vanishes from the map cannot answer it.
+ * Position is not limited to the active session. `IDLE` means no one is
+ * tracking right now, not that the vehicle has nowhere to stand: the last
+ * fix from any session on this assignment, or the driver's operating pin
+ * when no fix exists, is what the map plots. A row that vanishes because
+ * the driver parked cannot answer "where did they stop".
  */
 const LIVE_VEHICLES = `
   WITH live AS (
@@ -60,8 +62,8 @@ const LIVE_VEHICLES = `
            v.registration_number,
            cv.campaign_id,
            c.advertiser_id,
-           p.lat,
-           p.lon,
+           COALESCE(p.lat, d.base_lat) AS lat,
+           COALESCE(p.lon, d.base_lng) AS lon,
            p.recorded_at,
            CASE
              WHEN s.id IS NULL                                   THEN 'IDLE'
@@ -73,17 +75,20 @@ const LIVE_VEHICLES = `
       FROM campaign_vehicles cv
       JOIN vehicles v ON v.id = cv.vehicle_id
       JOIN campaigns c ON c.id = cv.campaign_id
+      JOIN drivers d ON d.id = v.driver_id
       LEFT JOIN tracking_sessions s
              ON s.campaign_vehicle_id = cv.id AND s.status = 'ACTIVE'
       LEFT JOIN LATERAL (
              SELECT g.lat, g.lon, g.recorded_at
                FROM gps_points g
-              WHERE g.session_id = s.id
+               JOIN tracking_sessions ts ON ts.id = g.session_id
+              WHERE ts.campaign_vehicle_id = cv.id
               ORDER BY g.recorded_at DESC
               LIMIT 1
            ) p ON TRUE
      WHERE cv.status IN ('ACCEPTED', 'INSTALLING', 'ACTIVE')
   )`;
+
 
 interface ZoneKm {
   prime: number;
@@ -343,6 +348,7 @@ export async function livePositions(
         AND (:vehicleNumber::text IS NULL
              OR registration_number LIKE '%' || :vehicleNumber || '%')
         AND lat IS NOT NULL
+        AND lon IS NOT NULL
       ORDER BY recorded_at DESC NULLS LAST`,
     {
       replacements: {
@@ -629,7 +635,7 @@ async function topVehicles(campaignId: string, range: DateRange): Promise<TopVeh
 export interface VehicleListing {
   id: string;
   vehicleRef: string;
-  vehicleType: 'AUTO' | 'CAB';
+  vehicleType: 'AUTO' | 'CAB' | 'BUS' | 'TRUCK' | 'TEMPO';
   primaryArea: string;
   avgKmPerDay: number;
   zoneMix: ZoneKm;
@@ -668,7 +674,7 @@ export async function vehicleListing(input: {
   const rows = await sequelize.query<{
     id: string;
     registration_number: string;
-    category: 'AUTO' | 'CAB';
+    category: 'AUTO' | 'CAB' | 'BUS' | 'TRUCK' | 'TEMPO';
     area: string | null;
     status: string;
     km: string | null;

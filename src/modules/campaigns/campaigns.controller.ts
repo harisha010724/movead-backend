@@ -14,12 +14,16 @@ import {
   CampaignTripParamSchema,
   CampaignTripQuerySchema,
 } from '../../contracts/tracking';
+import { CampaignPhotoParamSchema } from '../../contracts/brandingProofs';
 import { IdParamSchema } from '../../contracts/common';
+import * as brandingProofs from '../brandingProofs/brandingProofs.service';
 import * as drivers from '../drivers/drivers.service';
 import * as tracking from '../tracking/tracking.service';
 import { BadRequestError, ForbiddenError } from '../../shared/errors';
 import { currentUser } from '../../shared/http/middleware/auth';
 import { parseBody, parseParams, parseQuery } from '../../shared/http/validate';
+
+import * as rateCards from '../advertisers/rateCards.service';
 
 import * as campaigns from './campaigns.service';
 
@@ -54,6 +58,7 @@ export async function create(req: Request, res: Response): Promise<void> {
     brandName: body.brandName,
     city: body.city,
     vehicleType: body.vehicleType,
+    adDimension: body.adDimension,
     startDate: body.startDate,
     endDate: body.endDate,
     zonePrimeKm: body.zonePrimeKm,
@@ -116,6 +121,19 @@ export async function getTrip(req: Request, res: Response): Promise<void> {
   res.json(await tracking.campaignTrip(campaign.id, tripId));
 }
 
+export async function listBrandingProofs(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  res.json({ items: await brandingProofs.listForAdvertiser(advertiserIdOf(req), id) });
+}
+
+export async function brandingProofPhoto(req: Request, res: Response): Promise<void> {
+  const { id, photoId } = parseParams(req, CampaignPhotoParamSchema);
+  const stored = await brandingProofs.readPhotoForAdvertiser(advertiserIdOf(req), id, photoId);
+  res.setHeader('content-type', stored.contentType);
+  res.setHeader('content-disposition', `inline; filename="${stored.fileName}"`);
+  res.send(stored.bytes);
+}
+
 export async function update(req: Request, res: Response): Promise<void> {
   const { id } = parseParams(req, IdParamSchema);
   const body = parseBody(req, CreateCampaignRequestSchema);
@@ -130,6 +148,7 @@ export async function update(req: Request, res: Response): Promise<void> {
       brandName: body.brandName,
       city: body.city,
       vehicleType: body.vehicleType,
+      adDimension: body.adDimension,
       startDate: body.startDate,
       endDate: body.endDate,
       zonePrimeKm: body.zonePrimeKm,
@@ -157,17 +176,21 @@ export async function availableVehicles(req: Request, res: Response): Promise<vo
   );
 }
 
-export function estimate(req: Request, res: Response): void {
+export async function estimate(req: Request, res: Response): Promise<void> {
   const body = parseBody(req, EstimateCampaignRequestSchema);
-  advertiserIdOf(req);
   res.json(
-    campaigns.estimate({
+    await campaigns.estimate({
+      advertiserId: advertiserIdOf(req),
       startDate: body.startDate,
       endDate: body.endDate,
       zonePrimeKm: body.zonePrimeKm,
       zoneSecondaryKm: body.zoneSecondaryKm,
     }),
   );
+}
+
+export async function rateCard(req: Request, res: Response): Promise<void> {
+  res.json(await rateCards.currentFor(advertiserIdOf(req)));
 }
 
 export async function uploadCreative(req: Request, res: Response): Promise<void> {

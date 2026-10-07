@@ -43,6 +43,9 @@ export type PhotoAngle = 'FRONT' | 'REAR' | 'LEFT' | 'RIGHT';
 export const REQUIRED_ANGLES: Record<CampaignVehicleType, PhotoAngle[]> = {
   CAB: ['FRONT', 'REAR', 'LEFT', 'RIGHT'],
   AUTO: ['REAR', 'LEFT', 'RIGHT'],
+  BUS: ['FRONT', 'REAR', 'LEFT', 'RIGHT'],
+  TRUCK: ['FRONT', 'REAR', 'LEFT', 'RIGHT'],
+  TEMPO: ['FRONT', 'REAR', 'LEFT', 'RIGHT'],
 };
 
 /** Assignment states in which the vehicle is spoken for (AC-22.6). */

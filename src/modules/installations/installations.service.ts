@@ -4,13 +4,14 @@ import { Op } from 'sequelize';
 
 import { sequelize } from '../../db/sequelize';
 import { money, toLedger, toPayable } from '../../pricing/money';
-import { DRIVER_RATE } from '../../pricing/rates';
+import { advertiserRatesFromCampaign, driverRatesFrom } from '../../pricing/rateCards';
 import * as tracking from '../tracking/tracking.service';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
 import { campaignDateHasLapsed } from '../../shared/time';
 import * as audit from '../audit/audit.service';
 import { Campaign, type CampaignStatus } from '../campaigns/campaigns.model';
 import { Driver, Vehicle } from '../drivers/drivers.model';
+import * as brandingProofs from '../brandingProofs/brandingProofs.service';
 import * as notifications from '../notifications/notifications.service';
 import { objectStore } from '../storage';
 
@@ -33,12 +34,15 @@ import {
  * installation opens the gate, it does not backdate anything through it.
  */
 
-/** AC-15: the driver's share, which is deliberately not the advertiser's rate. */
-const DRIVER_RATES = {
-  prime: money(DRIVER_RATE.prime),
-  secondary: money(DRIVER_RATE.secondary),
-  network: money(DRIVER_RATE.network),
-} as const;
+/** AC-15: the driver's share of this campaign's snapshotted advertiser rates. */
+function driverRatesOf(campaign: Campaign) {
+  const driver = driverRatesFrom(advertiserRatesFromCampaign(campaign));
+  return {
+    prime: money(driver.prime),
+    secondary: money(driver.secondary),
+    network: money(driver.network),
+  };
+}
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_PHOTO_TYPES = {
@@ -467,6 +471,8 @@ export async function approveInstallation(input: {
     href: `/campaigns/${campaign.id}`,
   });
 
+  await brandingProofs.requestIfNone(assignment.id);
+
   return toAssignmentView(await loadAssignment(assignment.id));
 }
 
@@ -777,6 +783,7 @@ export async function driverCampaign(driverId: string): Promise<DriverCampaignVi
 
   const targetKm = campaign.targetKm ? Number(campaign.targetKm) : 0;
   const achieved = await tracking.achievedFor({ driverId, campaignId: campaign.id });
+  const driverRates = driverRatesOf(campaign);
 
   return {
     id: campaign.id,
@@ -793,14 +800,14 @@ export async function driverCampaign(driverId: string): Promise<DriverCampaignVi
     rateCard: {
       model: 'zoned',
       zones: [
-        { zone: 'prime', label: 'Prime', ratePerKm: toPayable(DRIVER_RATES.prime) },
-        { zone: 'secondary', label: 'Secondary', ratePerKm: toPayable(DRIVER_RATES.secondary) },
-        { zone: 'network', label: 'Network', ratePerKm: toPayable(DRIVER_RATES.network) },
+        { zone: 'prime', label: 'Prime', ratePerKm: toPayable(driverRates.prime) },
+        { zone: 'secondary', label: 'Secondary', ratePerKm: toPayable(driverRates.secondary) },
+        { zone: 'network', label: 'Network', ratePerKm: toPayable(driverRates.network) },
       ],
     },
     payoutType: 'per_km',
     minMonthlyTargetKm: targetKm,
-    expectedMonthlyEarning: toPayable(DRIVER_RATES.secondary.times(targetKm)),
+    expectedMonthlyEarning: toPayable(driverRates.secondary.times(targetKm)),
     elapsedDays,
     totalDays,
     daysLeft: Math.max(totalDays - elapsedDays, 0),

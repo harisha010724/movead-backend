@@ -1,4 +1,4 @@
-import { commonErrorResponses, ErrorBodySchema, IdParamSchema } from './common';
+import { commonErrorResponses, ErrorBodySchema, IdParamSchema, MoneySchema } from './common';
 import { registry, z } from './registry';
 
 /**
@@ -13,6 +13,40 @@ import { registry, z } from './registry';
  */
 
 const EmailSchema = z.email().max(254).toLowerCase();
+
+const RatePerKmSchema = z
+  .string()
+  .trim()
+  .regex(/^\d+(\.\d{1,4})?$/, 'Enter a rate with up to 4 decimal places')
+  .refine((value) => Number(value) <= 1000, 'Rate must be ₹1,000/km or less');
+
+export const ZoneRateCardSchema = registry.register(
+  'ZoneRateCard',
+  z.object({
+    prime: MoneySchema,
+    secondary: MoneySchema,
+    network: MoneySchema,
+    driver: z.object({
+      prime: MoneySchema,
+      secondary: MoneySchema,
+      network: MoneySchema,
+    }),
+    source: z.enum(['default', 'custom']),
+    effectiveFrom: z
+      .string()
+      .nullable()
+      .describe('When the current custom card was set. Null on the platform default.'),
+  }),
+);
+
+export const UpdateRateCardRequestSchema = registry.register(
+  'UpdateRateCardRequest',
+  z.object({
+    prime: RatePerKmSchema,
+    secondary: RatePerKmSchema,
+    network: RatePerKmSchema,
+  }),
+);
 
 export const AdvertiserUserSchema = registry.register(
   'AdvertiserUser',
@@ -40,6 +74,7 @@ export const AdvertiserSchema = registry.register(
     status: z.enum(['ONBOARDING', 'ACTIVE', 'SUSPENDED', 'CLOSED']),
     createdAt: z.string(),
     primaryUser: AdvertiserUserSchema.nullable(),
+    rateCard: ZoneRateCardSchema,
   }),
 );
 
@@ -193,6 +228,41 @@ registry.registerPath({
     403: { description: 'Missing permission.', content: json(ErrorBodySchema) },
     404: { description: 'No advertiser with that id.', content: json(ErrorBodySchema) },
     409: { description: 'That email is already registered.', content: json(ErrorBodySchema) },
+    401: commonErrorResponses[401],
+    400: commonErrorResponses[400],
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/admin/advertisers/{id}/rate-card',
+  tags: ['admin-advertisers'],
+  summary: "Read an advertiser's current rate card",
+  description:
+    'Requires `advertiser.read`. Returns the custom card when one has been set, otherwise the platform default (₹5 / ₹2 / ₹1).',
+  security: [{ cookieAuth: [] }],
+  request: { params: IdParamSchema },
+  responses: {
+    200: { description: 'The current card.', content: json(ZoneRateCardSchema) },
+    403: { description: 'Missing permission.', content: json(ErrorBodySchema) },
+    404: { description: 'No advertiser with that id.', content: json(ErrorBodySchema) },
+    401: commonErrorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: 'put',
+  path: '/v1/admin/advertisers/{id}/rate-card',
+  tags: ['admin-advertisers'],
+  summary: "Set an advertiser's rates",
+  description:
+    'Requires `rate.change`. Writes a new card version. Existing campaigns keep the rates they were sold at; only new campaigns use these numbers.',
+  security: [{ cookieAuth: [] }],
+  request: { params: IdParamSchema, body: { content: json(UpdateRateCardRequestSchema) } },
+  responses: {
+    200: { description: 'The new current card.', content: json(ZoneRateCardSchema) },
+    403: { description: 'Missing permission.', content: json(ErrorBodySchema) },
+    404: { description: 'No advertiser with that id.', content: json(ErrorBodySchema) },
     401: commonErrorResponses[401],
     400: commonErrorResponses[400],
   },

@@ -1,3 +1,5 @@
+import { isAdDimensionFor } from '../modules/campaigns/vehicleCatalog';
+import { ZoneRateCardSchema } from './advertisers';
 import { IdParamSchema, MoneySchema, commonErrorResponses, ErrorBodySchema } from './common';
 import { registry, z } from './registry';
 
@@ -34,7 +36,8 @@ export const ZonePolygonsSchema = z.object({
   secondary: z.object({ path: z.array(LatLngSchema).min(3).max(200) }).optional(),
 });
 
-export const CampaignVehicleTypeSchema = z.enum(['CAB', 'AUTO']);
+export const CampaignVehicleTypeSchema = z.enum(['CAB', 'AUTO', 'BUS', 'TRUCK', 'TEMPO']);
+export const AdDimensionSchema = z.string().trim().min(1).max(40);
 
 export const CampaignStatusSchema = z.enum([
   'DRAFT',
@@ -59,6 +62,7 @@ export const CampaignSchema = registry.register(
     status: CampaignStatusSchema,
     city: z.string(),
     vehicleType: CampaignVehicleTypeSchema,
+    adDimension: AdDimensionSchema.nullable(),
     startDate: DateSchema,
     endDate: DateSchema,
     budget: MoneySchema,
@@ -78,6 +82,11 @@ export const CampaignSchema = registry.register(
     vehicleCount: z.number().int(),
     verifiedKm: z.number(),
     impressions: z.number().int(),
+    rateCard: z.object({
+      prime: MoneySchema,
+      secondary: MoneySchema,
+      network: MoneySchema,
+    }),
   }),
 );
 
@@ -144,21 +153,27 @@ export const CampaignListSchema = registry.register(
 
 export const CreateCampaignRequestSchema = registry.register(
   'CreateCampaignRequest',
-  z.object({
-    name: z.string().trim().min(3).max(80),
-    brandName: z.string().trim().min(2).max(120),
-    city: z.string().min(1).max(80),
-    vehicleType: CampaignVehicleTypeSchema,
-    startDate: DateSchema,
-    endDate: DateSchema,
-    zonePrimeKm: ZoneKmSchema,
-    zoneSecondaryKm: ZoneKmSchema,
-    locations: z.array(CampaignLocationSchema).max(40).optional().default([]),
-    zonePolygons: ZonePolygonsSchema.optional().default({}),
-    requestedVehicleIds: z.array(z.uuid()).max(80).optional().default([]),
-    targetKm: z.string().optional(),
-    creativeKey: z.string().min(1).optional(),
-  }),
+  z
+    .object({
+      name: z.string().trim().min(3).max(80),
+      brandName: z.string().trim().min(2).max(120),
+      city: z.string().min(1).max(80),
+      vehicleType: CampaignVehicleTypeSchema,
+      adDimension: AdDimensionSchema,
+      startDate: DateSchema,
+      endDate: DateSchema,
+      zonePrimeKm: ZoneKmSchema,
+      zoneSecondaryKm: ZoneKmSchema,
+      locations: z.array(CampaignLocationSchema).max(40).optional().default([]),
+      zonePolygons: ZonePolygonsSchema.optional().default({}),
+      requestedVehicleIds: z.array(z.uuid()).max(80).optional().default([]),
+      targetKm: z.string().optional(),
+      creativeKey: z.string().min(1).optional(),
+    })
+    .refine((data) => isAdDimensionFor(data.vehicleType, data.adDimension), {
+      message: 'Select an ad size that fits this vehicle',
+      path: ['adDimension'],
+    }),
 );
 
 export const EstimateCampaignRequestSchema = registry.register(
@@ -190,6 +205,11 @@ export const EstimateCampaignResponseSchema = registry.register(
     }),
     estimatedVehicles: z.number().int(),
     estimatedDays: z.number().int(),
+    rates: z.object({
+      prime: MoneySchema,
+      secondary: MoneySchema,
+      network: MoneySchema,
+    }),
   }),
 );
 
@@ -319,12 +339,26 @@ registry.registerPath({
   tags: ['campaigns'],
   summary: 'Estimate reach for a draft campaign',
   description:
-    'Uses planned Prime and Secondary kilometres at the fixed rates (₹5/km and ₹2/km). Network is leftover geography at ₹1/km and is not planned. An estimate is not a commitment — billing is only for verified kilometres.',
+    'Uses planned Prime and Secondary kilometres at this advertiser\'s current rates. Network is leftover geography and is not planned. An estimate is not a commitment — billing is only for verified kilometres.',
   security: [{ cookieAuth: [] }],
   request: { body: { content: json(EstimateCampaignRequestSchema) } },
   responses: {
     200: { description: 'Estimate.', content: json(EstimateCampaignResponseSchema) },
     400: commonErrorResponses[400],
+    401: commonErrorResponses[401],
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/v1/campaigns/rate-card',
+  tags: ['campaigns'],
+  summary: "Read this advertiser's current rate card",
+  description:
+    'Requires `advertiser.campaign.create`. The card operations set for this account — platform default until they do. Advertisers cannot edit it.',
+  security: [{ cookieAuth: [] }],
+  responses: {
+    200: { description: 'The current card.', content: json(ZoneRateCardSchema) },
     401: commonErrorResponses[401],
   },
 });

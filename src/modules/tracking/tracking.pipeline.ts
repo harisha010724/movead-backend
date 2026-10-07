@@ -114,6 +114,14 @@ export interface BuildInput {
   billable: boolean;
   /** Why not, when `billable` is false. Recorded, never releasable. */
   notBillableReason: string | null;
+  /**
+   * Rates in force for this campaign. Defaults to the platform card so a
+   * caller that has not snapshotted yet still prices the pilot numbers.
+   */
+  rates?: {
+    advertiser: Record<PricingZone, Money>;
+    driver: Record<PricingZone, Money>;
+  };
 }
 
 /**
@@ -197,8 +205,10 @@ export function buildSegments(input: BuildInput): BuiltSegment[] {
 
       const zone = part.zone;
       const km = part.distanceKm.toFixed(6);
-      const advertiserRate = ADVERTISER_RATE[zone];
-      const driverRate = DRIVER_RATE[zone];
+      const advertiserRates = input.rates?.advertiser ?? ADVERTISER_RATE;
+      const driverRates = input.rates?.driver ?? DRIVER_RATE;
+      const advertiserRate = advertiserRates[zone];
+      const driverRate = driverRates[zone];
       const earns = state === 'BILLABLE';
 
       segments.push({

@@ -218,7 +218,7 @@ const VehicleListingSchema = registry.register(
       z.object({
         id: z.uuid(),
         vehicleRef: z.string(),
-        vehicleType: z.enum(['AUTO', 'CAB']),
+        vehicleType: z.enum(['AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO']),
         primaryArea: z.string(),
         avgKmPerDay: z.number(),
         zoneMix: ZoneKmSchema.openapi({

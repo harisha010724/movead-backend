@@ -530,3 +530,61 @@ describe('audience isolation (WEB-001)', () => {
     expect(response.status).toBe(401);
   });
 });
+
+describe('advertiser rate cards', () => {
+  it('returns the platform default until operations set a card', async () => {
+    const admin = await signIn();
+    const advertiserId = await onboardAdvertiser(admin);
+
+    const card = await admin.get(`/v1/admin/advertisers/${advertiserId}/rate-card`).expect(200);
+    expect(card.body).toMatchObject({
+      prime: '5.0000',
+      secondary: '2.0000',
+      network: '1.0000',
+      source: 'default',
+      effectiveFrom: null,
+    });
+    expect(card.body.driver).toEqual({
+      prime: '3.0000',
+      secondary: '1.2000',
+      network: '0.6000',
+    });
+
+    const list = await admin.get('/v1/admin/advertisers').expect(200);
+    expect(list.body[0].rateCard.source).toBe('default');
+  });
+
+  it('lets operations set a custom card without letting the advertiser change it', async () => {
+    const admin = await signIn();
+    const advertiserId = await onboardAdvertiser(admin);
+
+    const saved = await admin
+      .put(`/v1/admin/advertisers/${advertiserId}/rate-card`)
+      .send({ prime: '4', secondary: '1.5', network: '0.8' })
+      .expect(200);
+
+    expect(saved.body.source).toBe('custom');
+    expect(saved.body.prime).toBe('4.0000');
+    expect(saved.body.driver.prime).toBe('2.4000');
+    expect(saved.body.effectiveFrom).toEqual(expect.any(String));
+
+    const list = await admin.get('/v1/admin/advertisers').expect(200);
+    expect(list.body[0].rateCard.source).toBe('custom');
+    expect(list.body[0].rateCard.prime).toBe('4.0000');
+
+    const portal = client();
+    await portal
+      .post('/v1/auth/login')
+      .send({ email: ADVERTISER_USER.email, password: CHOSEN_PASSWORD })
+      .expect(200);
+
+    const own = await portal.get('/v1/campaigns/rate-card').expect(200);
+    expect(own.body.prime).toBe('4.0000');
+    expect(own.body.source).toBe('custom');
+
+    const refused = await portal
+      .put(`/v1/admin/advertisers/${advertiserId}/rate-card`)
+      .send({ prime: '1', secondary: '1', network: '1' });
+    expect(refused.status).toBe(401);
+  });
+});

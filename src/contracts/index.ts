@@ -8,6 +8,7 @@ import { registry } from './registry';
 // paths on the shared registry. A module that is not imported here is absent
 // from the published document, so add the import when you add the module.
 import './advertisers';
+import './brandingProofs';
 import './campaigns';
 import './common';
 import './dashboards';

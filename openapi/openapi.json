@@ -163,6 +163,83 @@
         ],
         "description": "Flat error envelope. `code` is stable and safe to branch on; `message` is shown to the user and may change."
       },
+      "ZoneRateCard": {
+        "type": "object",
+        "properties": {
+          "prime": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "secondary": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "network": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "driver": {
+            "type": "object",
+            "properties": {
+              "prime": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "secondary": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "network": {
+                "$ref": "#/components/schemas/Money"
+              }
+            },
+            "required": [
+              "prime",
+              "secondary",
+              "network"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "default",
+              "custom"
+            ]
+          },
+          "effectiveFrom": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the current custom card was set. Null on the platform default."
+          }
+        },
+        "required": [
+          "prime",
+          "secondary",
+          "network",
+          "driver",
+          "source",
+          "effectiveFrom"
+        ]
+      },
+      "UpdateRateCardRequest": {
+        "type": "object",
+        "properties": {
+          "prime": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,4})?$"
+          },
+          "secondary": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,4})?$"
+          },
+          "network": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,4})?$"
+          }
+        },
+        "required": [
+          "prime",
+          "secondary",
+          "network"
+        ]
+      },
       "AdvertiserUser": {
         "type": "object",
         "properties": {
@@ -248,6 +325,9 @@
                 ]
               }
             ]
+          },
+          "rateCard": {
+            "$ref": "#/components/schemas/ZoneRateCard"
           }
         },
         "required": [
@@ -259,7 +339,8 @@
           "billingEmail",
           "status",
           "createdAt",
-          "primaryUser"
+          "primaryUser",
+          "rateCard"
         ]
       },
       "AdvertiserContact": {
@@ -423,6 +504,187 @@
           "invitationEmailed"
         ]
       },
+      "BrandingProofAngle": {
+        "type": "string",
+        "enum": [
+          "FRONT",
+          "REAR",
+          "LEFT",
+          "RIGHT",
+          "AD_CLOSEUP"
+        ]
+      },
+      "BrandingProofStatus": {
+        "type": "string",
+        "enum": [
+          "REQUESTED",
+          "IN_PROGRESS",
+          "SUBMITTED",
+          "APPROVED",
+          "REJECTED"
+        ]
+      },
+      "BrandingProofPhoto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "angle": {
+            "$ref": "#/components/schemas/BrandingProofAngle"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lon": {
+            "type": "number"
+          },
+          "capturedAt": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "angle",
+          "fileName",
+          "lat",
+          "lon",
+          "capturedAt",
+          "uploadedAt"
+        ]
+      },
+      "BrandingProof": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "registrationNumber": {
+            "type": "string"
+          },
+          "driverName": {
+            "type": "string"
+          },
+          "vehicleCategory": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BrandingProofStatus"
+          },
+          "dueAt": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rejectionReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "photoCount": {
+            "type": "integer"
+          },
+          "required": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrandingProofAngle"
+            }
+          },
+          "uploaded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrandingProofAngle"
+            }
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BrandingProofPhoto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "assignmentId",
+          "campaignId",
+          "campaignName",
+          "registrationNumber",
+          "driverName",
+          "vehicleCategory",
+          "status",
+          "dueAt",
+          "requestedAt",
+          "submittedAt",
+          "reviewedAt",
+          "rejectionReason",
+          "photoCount",
+          "required",
+          "uploaded",
+          "photos"
+        ]
+      },
+      "BrandingProofEligibleAssignment": {
+        "type": "object",
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignName": {
+            "type": "string"
+          },
+          "registrationNumber": {
+            "type": "string"
+          },
+          "driverName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignmentId",
+          "campaignId",
+          "campaignName",
+          "registrationNumber",
+          "driverName"
+        ]
+      },
       "Campaign": {
         "type": "object",
         "properties": {
@@ -459,8 +721,19 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
+          },
+          "adDimension": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 40
           },
           "startDate": {
             "type": "string",
@@ -645,6 +918,25 @@
           },
           "impressions": {
             "type": "integer"
+          },
+          "rateCard": {
+            "type": "object",
+            "properties": {
+              "prime": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "secondary": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "network": {
+                "$ref": "#/components/schemas/Money"
+              }
+            },
+            "required": [
+              "prime",
+              "secondary",
+              "network"
+            ]
           }
         },
         "required": [
@@ -654,6 +946,7 @@
           "status",
           "city",
           "vehicleType",
+          "adDimension",
           "startDate",
           "endDate",
           "budget",
@@ -672,7 +965,8 @@
           "creativeFileName",
           "vehicleCount",
           "verifiedKm",
-          "impressions"
+          "impressions",
+          "rateCard"
         ]
       },
       "AdminCampaign": {
@@ -819,8 +1113,16 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
+          },
+          "adDimension": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
           },
           "startDate": {
             "type": "string",
@@ -983,6 +1285,7 @@
           "brandName",
           "city",
           "vehicleType",
+          "adDimension",
           "startDate",
           "endDate"
         ]
@@ -998,7 +1301,10 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "startDate": {
@@ -1084,6 +1390,25 @@
           },
           "estimatedDays": {
             "type": "integer"
+          },
+          "rates": {
+            "type": "object",
+            "properties": {
+              "prime": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "secondary": {
+                "$ref": "#/components/schemas/Money"
+              },
+              "network": {
+                "$ref": "#/components/schemas/Money"
+              }
+            },
+            "required": [
+              "prime",
+              "secondary",
+              "network"
+            ]
           }
         },
         "required": [
@@ -1091,7 +1416,8 @@
           "estimatedKm",
           "estimatedSpend",
           "estimatedVehicles",
-          "estimatedDays"
+          "estimatedDays",
+          "rates"
         ]
       },
       "AvailableVehiclesRequest": {
@@ -1101,7 +1427,10 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "city": {
@@ -1196,7 +1525,10 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "areaLabel": {
@@ -1817,7 +2149,10 @@
                   "type": "string",
                   "enum": [
                     "AUTO",
-                    "CAB"
+                    "CAB",
+                    "BUS",
+                    "TRUCK",
+                    "TEMPO"
                   ]
                 },
                 "primaryArea": {
@@ -2007,7 +2342,10 @@
             "type": "string",
             "enum": [
               "AUTO",
-              "CAB"
+              "CAB",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "bodyType": {
@@ -2219,7 +2557,10 @@
             "type": "string",
             "enum": [
               "AUTO",
-              "CAB"
+              "CAB",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "bodyType": {
@@ -2466,7 +2807,10 @@
             "type": "string",
             "enum": [
               "AUTO",
-              "CAB"
+              "CAB",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "bodyType": {
@@ -2756,7 +3100,10 @@
                 "type": "string",
                 "enum": [
                   "AUTO",
-                  "CAB"
+                  "CAB",
+                  "BUS",
+                  "TRUCK",
+                  "TEMPO"
                 ]
               },
               "status": {
@@ -3087,7 +3434,10 @@
                 "type": "string",
                 "enum": [
                   "CAB",
-                  "AUTO"
+                  "AUTO",
+                  "BUS",
+                  "TRUCK",
+                  "TEMPO"
                 ]
               },
               "makeModel": {
@@ -3187,7 +3537,10 @@
             "type": "string",
             "enum": [
               "AUTO",
-              "CAB"
+              "CAB",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "status": {
@@ -3325,7 +3678,10 @@
             "type": "string",
             "enum": [
               "CAB",
-              "AUTO"
+              "AUTO",
+              "BUS",
+              "TRUCK",
+              "TEMPO"
             ]
           },
           "publicRef": {
@@ -6822,6 +7178,695 @@
         }
       }
     },
+    "/v1/admin/advertisers/{id}/rate-card": {
+      "get": {
+        "tags": [
+          "admin-advertisers"
+        ],
+        "summary": "Read an advertiser's current rate card",
+        "description": "Requires `advertiser.read`. Returns the custom card when one has been set, otherwise the platform default (₹5 / ₹2 / ₹1).",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneRateCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No advertiser with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin-advertisers"
+        ],
+        "summary": "Set an advertiser's rates",
+        "description": "Requires `rate.change`. Writes a new card version. Existing campaigns keep the rates they were sold at; only new campaigns use these numbers.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRateCardRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new current card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneRateCard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No advertiser with that id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/branding-proofs": {
+      "get": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "Recently sent wrap photos",
+        "description": "Requires `branding.review`. Published checks, oldest first. Advertisers see the same photos on the campaign.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published wrap-photo sets.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BrandingProof"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/branding-proofs/waiting": {
+      "get": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "Requested wrap photos not yet submitted",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Outstanding requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BrandingProof"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/branding-proofs/eligible": {
+      "get": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "Live assignments that can receive a wrap-photo request",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live vehicles without an open check.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BrandingProofEligibleAssignment"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/assignments/{id}/branding-proofs": {
+      "post": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "Ask a driver to photograph the wrap",
+        "description": "Requires `branding.review`. Refused if a check is already open.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingProof"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already open, or the assignment is not live.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/branding-proof-photos/{photoId}": {
+      "get": {
+        "tags": [
+          "admin-installations"
+        ],
+        "summary": "One wrap photo",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "photoId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image bytes."
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/branding-proof": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "The open wrap-photo check, if any",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The open check, or null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/BrandingProof"
+                    },
+                    {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/branding-proofs/{id}/photos": {
+      "post": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "Upload one wrap photo",
+        "description": "Multipart `file` plus `angle`, `lat`, `lon` and `capturedAt` query parameters. Location is taken from the request, not from the file.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingProof"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing angle, stale capture, or unsupported file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/branding-proofs/{id}/submit": {
+      "post": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "Publish wrap photos to the advertiser",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandingProof"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An angle is still missing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/branding-proofs": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Wrap photos for this campaign",
+        "description": "GPS-stamped photos the driver took of the advertisement. Scoped to the signed-in advertiser.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published wrap-photo sets, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BrandingProof"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/{id}/branding-proof-photos/{photoId}": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "One wrap photo on this campaign",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "photoId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image bytes."
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/driver/branding-proof-photos/{photoId}": {
+      "get": {
+        "tags": [
+          "driver-portal"
+        ],
+        "summary": "The driver's own wrap photo",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "photoId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image bytes."
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/campaigns": {
       "get": {
         "tags": [
@@ -6960,7 +8005,7 @@
           "campaigns"
         ],
         "summary": "Estimate reach for a draft campaign",
-        "description": "Uses planned Prime and Secondary kilometres at the fixed rates (₹5/km and ₹2/km). Network is leftover geography at ₹1/km and is not planned. An estimate is not a commitment — billing is only for verified kilometres.",
+        "description": "Uses planned Prime and Secondary kilometres at this advertiser's current rates. Network is leftover geography and is not planned. An estimate is not a commitment — billing is only for verified kilometres.",
         "security": [
           {
             "cookieAuth": []
@@ -6992,6 +8037,42 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or expired credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/campaigns/rate-card": {
+      "get": {
+        "tags": [
+          "campaigns"
+        ],
+        "summary": "Read this advertiser's current rate card",
+        "description": "Requires `advertiser.campaign.create`. The card operations set for this account — platform default until they do. Advertisers cannot edit it.",
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneRateCard"
                 }
               }
             }
@@ -10941,7 +12022,10 @@
               "type": "string",
               "enum": [
                 "CAB",
-                "AUTO"
+                "AUTO",
+                "BUS",
+                "TRUCK",
+                "TEMPO"
               ]
             },
             "required": false,

@@ -14,6 +14,7 @@ import {
 } from '../modules/dashboards/dashboards.routes';
 import { driverPortalRoutes } from '../modules/drivers/driver-portal.routes';
 import { adminDriverRoutes } from '../modules/drivers/drivers.routes';
+import { adminBrandingProofRoutes } from '../modules/brandingProofs/brandingProofs.routes';
 import { adminInstallationRoutes } from '../modules/installations/installations.routes';
 import { advertiserVehicleRoutes } from '../modules/drivers/vehicles.advertiser.routes';
 import { healthRoutes } from '../modules/health/health.routes';
@@ -79,6 +80,7 @@ v1.use('/admin', adminInvitationRoutes());
 v1.use('/admin', adminAdvertiserRoutes());
 v1.use('/admin', adminCampaignRoutes());
 v1.use('/admin', adminInstallationRoutes());
+v1.use('/admin', adminBrandingProofRoutes());
 v1.use('/admin', adminNotificationRoutes());
 v1.use('/admin', adminDriverRoutes());
 

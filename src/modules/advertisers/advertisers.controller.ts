@@ -4,12 +4,14 @@ import {
   AdvertiserContactSchema,
   CreateAdvertiserRequestSchema,
   UpdateAdvertiserRequestSchema,
+  UpdateRateCardRequestSchema,
 } from '../../contracts/advertisers';
 import { IdParamSchema } from '../../contracts/common';
 import { currentUser } from '../../shared/http/middleware/auth';
 import { parseBody, parseParams } from '../../shared/http/validate';
 
 import * as advertisers from './advertisers.service';
+import * as rateCards from './rateCards.service';
 
 export async function create(req: Request, res: Response): Promise<void> {
   const body = parseBody(req, CreateAdvertiserRequestSchema);
@@ -41,6 +43,28 @@ export async function update(req: Request, res: Response): Promise<void> {
     await advertisers.updateAdvertiser({
       advertiserId: id,
       changes,
+      actorUserId: actor.id,
+      ip: req.ip ?? null,
+    }),
+  );
+}
+
+export async function getRateCard(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  res.json(await rateCards.currentFor(id));
+}
+
+export async function putRateCard(req: Request, res: Response): Promise<void> {
+  const { id } = parseParams(req, IdParamSchema);
+  const body = parseBody(req, UpdateRateCardRequestSchema);
+  const actor = currentUser(req).user;
+
+  res.json(
+    await rateCards.setFor({
+      advertiserId: id,
+      prime: body.prime,
+      secondary: body.secondary,
+      network: body.network,
       actorUserId: actor.id,
       ip: req.ip ?? null,
     }),

@@ -51,6 +51,7 @@ export function campaignRoutes(): Router {
   router.get('/', requirePermission('advertiser.campaign.read'), controller.list);
   router.post('/', requirePermission('advertiser.campaign.create'), controller.create);
   router.post('/estimate', requirePermission('advertiser.campaign.create'), controller.estimate);
+  router.get('/rate-card', requirePermission('advertiser.campaign.create'), controller.rateCard);
   router.post(
     '/available-vehicles',
     requirePermission('advertiser.vehicle.select'),
@@ -93,6 +94,16 @@ export function campaignRoutes(): Router {
     visibility.forCampaign,
   );
   router.get('/:id/drivers', requirePermission('advertiser.campaign.read'), controller.listDrivers);
+  router.get(
+    '/:id/branding-proofs',
+    requirePermission('advertiser.campaign.read'),
+    controller.listBrandingProofs,
+  );
+  router.get(
+    '/:id/branding-proof-photos/:photoId',
+    requirePermission('advertiser.campaign.read'),
+    controller.brandingProofPhoto,
+  );
   router.get('/:id/trips', requirePermission('advertiser.campaign.read'), controller.listTrips);
   router.get(
     '/:id/trips/:tripId',

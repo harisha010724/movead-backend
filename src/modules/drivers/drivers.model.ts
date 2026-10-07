@@ -24,7 +24,7 @@ export type VehicleStatus =
   | 'REJECTED'
   | 'REMOVED';
 
-export type VehicleCategory = 'AUTO' | 'CAB';
+export type VehicleCategory = 'AUTO' | 'CAB' | 'BUS' | 'TRUCK' | 'TEMPO';
 /** Constrained by `vehicles_fuel_type_known`, migration 022. */
 export type FuelType = 'PETROL' | 'DIESEL' | 'CNG' | 'LPG' | 'ELECTRIC' | 'HYBRID';
 export type DocumentKind = 'RC' | 'LICENCE' | 'INSURANCE' | 'POLLUTION' | 'PERMIT' | 'OTHER';
@@ -138,7 +138,7 @@ Vehicle.init(
     id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
     driverId: { type: DataTypes.UUID, allowNull: false },
     registrationNumber: { type: DataTypes.TEXT, allowNull: false, unique: true },
-    category: { type: DataTypes.ENUM('AUTO', 'CAB'), allowNull: false },
+    category: { type: DataTypes.ENUM('AUTO', 'CAB', 'BUS', 'TRUCK', 'TEMPO'), allowNull: false },
     bodyType: { type: DataTypes.TEXT, allowNull: true },
     makeModel: { type: DataTypes.TEXT, allowNull: true },
     colour: { type: DataTypes.TEXT, allowNull: true },

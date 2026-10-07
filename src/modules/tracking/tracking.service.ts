@@ -2,6 +2,7 @@ import { Op, QueryTypes, type Transaction } from 'sequelize';
 
 import { sequelize } from '../../db/sequelize';
 import { money, sum, toLedger, toPayable, type Money } from '../../pricing/money';
+import { advertiserRatesFromCampaign, pricingBundle } from '../../pricing/rateCards';
 import { config } from '../../shared/config';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
 import type { LatLng, Zone, ZonePolygons } from '../../shared/geo';
@@ -395,6 +396,7 @@ export async function ingestPoints(input: {
       polygons: polygonsOf(campaign),
       billable: gate.eligible,
       notBillableReason,
+      rates: pricingBundle(advertiserRatesFromCampaign(campaign)),
     });
 
     if (segments.length > 0) {

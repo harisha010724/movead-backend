@@ -4,6 +4,8 @@ import { campaignDateHasLapsed } from '../../shared/time';
 import { Campaign } from '../campaigns/campaigns.model';
 import { Driver, DriverConsent, Vehicle } from '../drivers/drivers.model';
 
+import * as brandingProofs from '../brandingProofs/brandingProofs.service';
+
 import { CampaignVehicle, Installation, LIVE_ASSIGNMENT } from './installations.model';
 
 export interface EligibilityCheck {
@@ -56,6 +58,9 @@ export async function eligibility(driverId: string): Promise<Eligibility> {
   const consented = consent?.action === 'GRANTED';
   const campaignRunning =
     campaign?.status === 'ACTIVE' && !campaignDateHasLapsed(campaign.endDate);
+  const wrapHold = assignment
+    ? await brandingProofs.earningHold(assignment.id)
+    : { held: false, reason: null };
 
   const vehicleApproved = Boolean(
     vehicle &&
@@ -103,14 +108,16 @@ export async function eligibility(driverId: string): Promise<Eligibility> {
     {
       id: 'ad_installed',
       label: 'Advertisement installed',
-      passed: assignment?.status === 'ACTIVE' && campaignRunning,
-      remedy: adInstalledRemedy(
-        campaign?.status ?? null,
-        assignment?.status ?? null,
-        installation?.status ?? null,
-        installation?.rejectionReason ?? null,
-        campaign?.endDate ?? null,
-      ),
+      passed: assignment?.status === 'ACTIVE' && campaignRunning && !wrapHold.held,
+      remedy: wrapHold.held
+        ? wrapHold.reason
+        : adInstalledRemedy(
+            campaign?.status ?? null,
+            assignment?.status ?? null,
+            installation?.status ?? null,
+            installation?.rejectionReason ?? null,
+            campaign?.endDate ?? null,
+          ),
     },
   ];
 

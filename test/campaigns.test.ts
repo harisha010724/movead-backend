@@ -31,6 +31,7 @@ const DRAFT = {
   brandName: 'Zephyr',
   city: 'Bengaluru',
   vehicleType: 'CAB',
+  adDimension: 'WRAP_180',
   startDate: '2026-09-01',
   endDate: '2026-09-14',
   zonePrimeKm: '4000',
@@ -112,6 +113,11 @@ describe('advertiser campaigns', () => {
     expect(created.body.zoneSecondaryKm).toBe('15000.0');
     expect(created.body.locations).toEqual(DRAFT.locations);
     expect(created.body.city).toBe('Bengaluru');
+    expect(created.body.rateCard).toEqual({
+      prime: '5.0000',
+      secondary: '2.0000',
+      network: '1.0000',
+    });
 
     const list = await portal.get('/v1/campaigns').expect(200);
     expect(list.body.total).toBe(1);
@@ -169,6 +175,18 @@ describe('advertiser campaigns', () => {
     expect(file.headers['content-type']).toMatch(/png/);
   });
 
+  it('refuses a wrap size that does not belong on that vehicle', async () => {
+    const portal = await signInAdvertiser();
+
+    const response = await portal.post('/v1/campaigns').send({
+      ...DRAFT,
+      vehicleType: 'BUS',
+      adDimension: 'WRAP_180',
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it('refuses a campaign shorter than seven days', async () => {
     const portal = await signInAdvertiser();
 
@@ -207,6 +225,77 @@ describe('advertiser campaigns', () => {
       network: 0,
     });
     expect(response.body.estimatedDays).toBe(14);
+    expect(response.body.rates).toEqual({
+      prime: '5.0000',
+      secondary: '2.0000',
+      network: '1.0000',
+    });
+  });
+
+  it('estimates and creates at the advertiser\'s custom rates', async () => {
+    const admin = await signIn();
+    const onboarded = await admin
+      .post('/v1/admin/advertisers')
+      .send({ ...ADVERTISER, user: ADVERTISER_USER })
+      .expect(201);
+    const advertiserId = String(onboarded.body.advertiser.id);
+
+    await admin
+      .put(`/v1/admin/advertisers/${advertiserId}/rate-card`)
+      .send({ prime: '4', secondary: '1.5', network: '0.8' })
+      .expect(200);
+
+    await client()
+      .post(`/v1/invitations/${inbox.tokenFor(ADVERTISER_USER.email)}/accept`)
+      .send({ password: CHOSEN_PASSWORD })
+      .expect(200);
+
+    const portal = client();
+    await portal
+      .post('/v1/auth/login')
+      .send({ email: ADVERTISER_USER.email, password: CHOSEN_PASSWORD })
+      .expect(200);
+
+    const estimate = await portal.post('/v1/campaigns/estimate').send({
+      city: 'Bengaluru',
+      vehicleType: 'CAB',
+      startDate: '2026-09-01',
+      endDate: '2026-09-14',
+      zonePrimeKm: '4000',
+      zoneSecondaryKm: '15000',
+    });
+
+    expect(estimate.status).toBe(200);
+    expect(estimate.body.estimatedSpend).toEqual({
+      prime: '16000.00',
+      secondary: '22500.00',
+      network: '0.00',
+      total: '38500.00',
+    });
+    expect(estimate.body.rates).toEqual({
+      prime: '4.0000',
+      secondary: '1.5000',
+      network: '0.8000',
+    });
+
+    const created = await portal.post('/v1/campaigns').send(DRAFT).expect(201);
+    expect(created.body.budget).toBe('38500.00');
+    expect(created.body.zonePrime).toBe('16000.00');
+    expect(created.body.zoneSecondary).toBe('22500.00');
+    expect(created.body.rateCard).toEqual({
+      prime: '4.0000',
+      secondary: '1.5000',
+      network: '0.8000',
+    });
+
+    await admin
+      .put(`/v1/admin/advertisers/${advertiserId}/rate-card`)
+      .send({ prime: '9', secondary: '3', network: '1' })
+      .expect(200);
+
+    const after = await portal.get(`/v1/campaigns/${String(created.body.id)}`).expect(200);
+    expect(after.body.rateCard.prime).toBe('4.0000');
+    expect(after.body.budget).toBe('38500.00');
   });
 
   it('does not let an advertiser read another advertiser\'s campaigns', async () => {

@@ -22,7 +22,7 @@ export type CampaignStatus =
   | 'COMPLETED'
   | 'CANCELLED';
 
-export type CampaignVehicleType = 'CAB' | 'AUTO';
+export type CampaignVehicleType = 'CAB' | 'AUTO' | 'BUS' | 'TRUCK' | 'TEMPO';
 
 export type ZoneTier = 'prime' | 'secondary';
 
@@ -46,6 +46,7 @@ export class Campaign extends Model<InferAttributes<Campaign>, InferCreationAttr
   declare brandName: string;
   declare city: string;
   declare vehicleType: CampaignVehicleType;
+  declare adDimension: string | null;
   declare creativeKey: string | null;
   declare creativeFileName: string | null;
   declare creativeContentType: string | null;
@@ -65,6 +66,10 @@ export class Campaign extends Model<InferAttributes<Campaign>, InferCreationAttr
   /** Advertiser request. Admin still confirms assignment (AC-22.4). */
   declare requestedVehicleIds: CreationOptional<string[]>;
   declare targetKm: string | null;
+  /** Advertiser ₹/km snapshotted when this campaign was created. */
+  declare ratePrime: CreationOptional<string>;
+  declare rateSecondary: CreationOptional<string>;
+  declare rateNetwork: CreationOptional<string>;
   declare createdBy: string;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -78,7 +83,11 @@ Campaign.init(
     name: { type: DataTypes.TEXT, allowNull: false },
     brandName: { type: DataTypes.TEXT, allowNull: false },
     city: { type: DataTypes.TEXT, allowNull: false },
-    vehicleType: { type: DataTypes.ENUM('CAB', 'AUTO'), allowNull: false },
+    vehicleType: {
+      type: DataTypes.ENUM('CAB', 'AUTO', 'BUS', 'TRUCK', 'TEMPO'),
+      allowNull: false,
+    },
+    adDimension: { type: DataTypes.TEXT, allowNull: true },
     creativeKey: { type: DataTypes.TEXT, allowNull: true },
     creativeFileName: { type: DataTypes.TEXT, allowNull: true },
     creativeContentType: { type: DataTypes.TEXT, allowNull: true },
@@ -113,6 +122,9 @@ Campaign.init(
     zonePolygons: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
     requestedVehicleIds: { type: DataTypes.ARRAY(DataTypes.UUID), allowNull: false, defaultValue: [] },
     targetKm: { type: DataTypes.DECIMAL(12, 4), allowNull: true },
+    ratePrime: { type: DataTypes.DECIMAL(8, 4), allowNull: false, defaultValue: '5.0000' },
+    rateSecondary: { type: DataTypes.DECIMAL(8, 4), allowNull: false, defaultValue: '2.0000' },
+    rateNetwork: { type: DataTypes.DECIMAL(8, 4), allowNull: false, defaultValue: '1.0000' },
     createdBy: { type: DataTypes.UUID, allowNull: false },
     createdAt: DataTypes.DATE,
     updatedAt: DataTypes.DATE,
