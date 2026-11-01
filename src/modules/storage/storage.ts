@@ -2,9 +2,9 @@
  * Object storage for campaign creatives.
  *
  * The rest of the app only ever sees a storage key (`{userId}/{uuid}.png`).
- * Today that file lives on disk under `campaign-images/`. When Azure Blob is
- * wired, this module grows a second driver and STORAGE_DRIVER switches — the
- * campaigns table does not change.
+ * Today that file lives on disk under `campaign-images/` (`local`) or in
+ * Azure Blob (`azure`). STORAGE_DRIVER selects the driver — the campaigns
+ * table does not change.
  */
 
 export interface StoredObject {

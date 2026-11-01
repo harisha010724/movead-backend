@@ -31,6 +31,7 @@ jobs:
         run: |
           npm ci
           npm run build
+          test -f dist/entrypoints/api.js
 
       # One zip instead of ~40k individual file uploads.
       #
@@ -64,9 +65,9 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_4A31FE642C6D4BDB8ADCD13F9A3B9414 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_69CE9D9E721A45AEA0C22C4E2BA77F13 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A93E81AE33D74BF09FFE86C3C5871287 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_95F81DBA7F8340DABA2D8D09E099EEDA }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_75CCB993C8444C5FA54D4F7A5435E0C4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_9049FE4EF86A4FE7BA4BAE7AE6F25985 }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp

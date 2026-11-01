@@ -197,15 +197,17 @@ const EnvSchema = z.object({
   MAIL_PREVIEW_DIR: z.string().default('tmp/mail'),
 
   /**
-   * Where campaign creatives live.
+   * Where campaign creatives and wrap photos live.
    *
-   * `local` writes under CAMPAIGN_IMAGES_DIR, one folder per user
-   * (`{userId}/{file}`). Azure Blob is the same interface with a different
-   * driver — swap STORAGE_DRIVER when that account exists. The API stores a
-   * storage key, never a URL, so the driver can change without rewriting rows.
+   * `local` writes under CAMPAIGN_IMAGES_DIR. `azure` writes to Blob on the
+   * storage account. The API stores a storage key, never a URL, so the driver
+   * can change without rewriting rows.
    */
-  STORAGE_DRIVER: z.enum(['local']).default('local'),
+  STORAGE_DRIVER: z.enum(['local', 'azure']).default('local'),
   CAMPAIGN_IMAGES_DIR: z.string().default('campaign-images'),
+  AZURE_STORAGE_ACCOUNT: z.string().optional(),
+  AZURE_STORAGE_ACCOUNT_KEY: z.string().optional(),
+  AZURE_STORAGE_CONTAINER: z.string().default('campaign-images'),
 
   /*
    * Tracking thresholds.
@@ -271,6 +273,22 @@ const EnvSchema = z.object({
       path: ['SMTP_URL'],
       message: 'SMTP_URL is required when MAIL_TRANSPORT is smtp',
     });
+  }
+  if (env.STORAGE_DRIVER === 'azure') {
+    if (!env.AZURE_STORAGE_ACCOUNT) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AZURE_STORAGE_ACCOUNT'],
+        message: 'AZURE_STORAGE_ACCOUNT is required when STORAGE_DRIVER is azure',
+      });
+    }
+    if (!env.AZURE_STORAGE_ACCOUNT_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AZURE_STORAGE_ACCOUNT_KEY'],
+        message: 'AZURE_STORAGE_ACCOUNT_KEY is required when STORAGE_DRIVER is azure',
+      });
+    }
   }
 });
 
@@ -377,6 +395,11 @@ export const config = {
   storage: {
     driver: env.STORAGE_DRIVER,
     campaignImagesDir: env.CAMPAIGN_IMAGES_DIR,
+    azure: {
+      account: env.AZURE_STORAGE_ACCOUNT ?? '',
+      accountKey: env.AZURE_STORAGE_ACCOUNT_KEY ?? '',
+      container: env.AZURE_STORAGE_CONTAINER,
+    },
   },
 
   tracking: {

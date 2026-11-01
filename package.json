@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^9.1.0",
+    "@azure/storage-blob": "^12.32.0",
     "@node-rs/argon2": "^2.1.0",
     "bullmq": "^6.1.2",
     "cookie-parser": "^1.4.7",
