@@ -6,7 +6,7 @@ name: Build and deploy Node.js app to Azure Web App - movead-api
 on:
   push:
     branches:
-      - 'main'
+      - main
   workflow_dispatch:
 
 jobs:
@@ -19,10 +19,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node.js version
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '22.x'
-<<<<<<< HEAD
           cache: npm
 
       # No `npm run test` here on purpose. The suite takes a Postgres advisory
@@ -43,14 +42,12 @@ jobs:
       # over SSH against this tree and `sequelize-cli` is a devDependency.
       - name: Zip artifact for deployment
         run: zip -qr release.zip . -x '.git/*' '.github/*'
-=======
->>>>>>> 0bce2274d9cae7b2404c7f7ce043838fa8f974aa
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: release.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -64,7 +61,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-<<<<<<< HEAD
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -72,15 +68,6 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_95F81DBA7F8340DABA2D8D09E099EEDA }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_75CCB993C8444C5FA54D4F7A5435E0C4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_9049FE4EF86A4FE7BA4BAE7AE6F25985 }}
-=======
-      
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_95F81DBA7F8340DABA2D8D09E099EEDA }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_75CCB993C84D4C5FA54D4F7A5435E0C4 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_9049FE4EF86A4FE7BA4BAE7AE6F25985 }}
->>>>>>> 0bce2274d9cae7b2404c7f7ce043838fa8f974aa
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -88,5 +75,4 @@ jobs:
         with:
           app-name: 'movead-api'
           slot-name: 'Production'
-          package: .
-          
+          package: release.zip
