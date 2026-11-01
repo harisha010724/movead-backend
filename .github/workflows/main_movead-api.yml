@@ -6,7 +6,7 @@ name: Build and deploy Node.js app to Azure Web App - movead-api
 on:
   push:
     branches:
-      - main
+      - 'main'
   workflow_dispatch:
 
 jobs:
@@ -19,34 +19,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node.js version
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
           node-version: '22.x'
-          cache: npm
-
-      # No `npm run test` here on purpose. The suite takes a Postgres advisory
-      # lock and truncates tables between files, so it needs a live Postgres and
-      # Redis; on a bare runner it fails and the deploy job never runs.
-      - name: Install and build
-        run: |
-          npm ci
-          npm run build
-
-      # One zip instead of ~40k individual file uploads.
-      #
-      # Deliberately more than `dist/`: `openapi/` is read from disk at runtime,
-      # and `.sequelizerc` points the migration CLI at `src/db/migrations` and
-      # `src/db/config.js`, which are plain CommonJS and never compiled into
-      # `dist/`. There is also no `npm prune --omit=dev`, because migrations run
-      # over SSH against this tree and `sequelize-cli` is a devDependency.
-      - name: Zip artifact for deployment
-        run: zip -qr release.zip . -x '.git/*' '.github/*'
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: release.zip
+          path: .
 
   deploy:
     runs-on: ubuntu-latest
@@ -60,13 +41,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
-
+      
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_4A31FE642C6D4BDB8ADCD13F9A3B9414 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_69CE9D9E721A45AEA0C22C4E2BA77F13 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_A93E81AE33D74BF09FFE86C3C5871287 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_95F81DBA7F8340DABA2D8D09E099EEDA }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_75CCB993C84D4C5FA54D4F7A5435E0C4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_9049FE4EF86A4FE7BA4BAE7AE6F25985 }}
 
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
@@ -74,4 +55,5 @@ jobs:
         with:
           app-name: 'movead-api'
           slot-name: 'Production'
-          package: release.zip
+          package: .
+          
