@@ -41,6 +41,10 @@ describe('cors', () => {
     expect(await loginFrom(null)).not.toBe(403);
   });
 
+  it('allows the deployed Static Web App even when it is missing from CORS_ORIGINS', async () => {
+    expect(await loginFrom('https://orange-coast-02ae6fb0f.6.azurestaticapps.net')).not.toBe(403);
+  });
+
   it('rejects an origin that is on neither list', async () => {
     expect(await loginFrom('http://evil.example')).toBe(403);
   });

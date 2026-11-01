@@ -38,7 +38,10 @@ export function createApp(options: AppOptions): Express {
 
   // Before everything, because everything downstream reads `req.ip`.
   app.use(forwardedFor());
-  app.use(helmet());
+  // APIs that browsers call from another origin cannot use helmet's default
+  // Cross-Origin-Resource-Policy: same-origin — Chrome blocks the response
+  // even after CORS allows it.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cors(corsOptions));
   app.use(express.json({ limit: options.jsonLimit ?? '512kb' }));
   // Web portal sessions ride in httpOnly cookies (architecture Part 12.1).
@@ -105,13 +108,29 @@ export function createApp(options: AppOptions): Express {
  * is refused by the very server that served it — and more generally, rejecting
  * a request that CORS was never designed to police protects nothing.
  */
+/**
+ * Portal hosts that must work even if App Service `CORS_ORIGINS` was not
+ * updated after a new Static Web App was created. Env still wins for anything
+ * else (local Vite, custom domains).
+ */
+export const builtinPortalOrigins = [
+  'https://orange-coast-02ae6fb0f.6.azurestaticapps.net',
+  'https://icy-mushroom-043c2f900.6.azurestaticapps.net',
+  'https://app.movead.in',
+] as const;
+
 function corsOptions(
   req: Request,
   callback: (error: Error | null, options?: CorsOptions) => void,
 ): void {
   const origin = req.headers.origin;
 
-  if (!origin || config.http.corsOrigins.includes(origin) || isSameOrigin(req, origin)) {
+  if (
+    !origin ||
+    config.http.corsOrigins.includes(origin) ||
+    (builtinPortalOrigins as readonly string[]).includes(origin) ||
+    isSameOrigin(req, origin)
+  ) {
     callback(null, { origin: true, credentials: true, maxAge: 86_400 });
     return;
   }
