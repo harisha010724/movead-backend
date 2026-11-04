@@ -23,6 +23,19 @@ import { z } from 'zod';
 loadDotenv({ path: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'] });
 
 /**
+ * App Service "Connection strings" do not become `DATABASE_URL`. A PostgreSQL
+ * entry named DATABASE_URL is injected as `POSTGRESQLCONNSTR_DATABASE_URL`, a
+ * Custom entry as `CUSTOMCONNSTR_DATABASE_URL`. Without this remap the process
+ * keeps the localhost default and every login times out.
+ */
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL =
+    process.env.POSTGRESQLCONNSTR_DATABASE_URL ||
+    process.env.CUSTOMCONNSTR_DATABASE_URL ||
+    process.env.POSTGRESQLCONNSTR_POSTGRESQL;
+}
+
+/**
  * Every environment variable the process reads, validated once at startup.
  *
  * Nothing else in the codebase touches `process.env`. A missing or malformed

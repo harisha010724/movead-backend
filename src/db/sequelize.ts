@@ -27,9 +27,10 @@ export const sequelize = new Sequelize(config.database.url, {
     idle: 10_000,
     acquire: 30_000,
   },
-  dialectOptions: config.database.ssl
-    ? { ssl: { require: true, rejectUnauthorized: false } }
-    : undefined,
+  dialectOptions: {
+    connectionTimeoutMillis: 8_000,
+    ...(config.database.ssl ? { ssl: { require: true, rejectUnauthorized: false } } : {}),
+  },
   define: {
     // The schema is snake_case (see MoveAd-Database-Design.md §1); models are
     // camelCase. Sequelize maps between them rather than either side bending.

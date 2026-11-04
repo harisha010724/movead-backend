@@ -13,7 +13,15 @@ import { pingRedis } from '../../shared/redis';
  * restart of every container at once.
  */
 
-const PROBE_TIMEOUT_MS = 2_000;
+const PROBE_TIMEOUT_MS = 8_000;
+
+function databaseHost(): string {
+  try {
+    return new URL(config.database.url).hostname;
+  } catch {
+    return 'unparseable-database-url';
+  }
+}
 
 export function liveness(service: string): Liveness {
   return {
@@ -26,12 +34,19 @@ export function liveness(service: string): Liveness {
 
 export async function readiness(service: string): Promise<Readiness> {
   const [database, redis] = await Promise.all([check(pingDatabase), check(pingRedis)]);
+  const host = databaseHost();
 
   return {
     status: database.status === 'up' && redis.status === 'up' ? 'ready' : 'degraded',
     service,
     version: config.version,
-    checks: { database, redis },
+    checks: {
+      database: {
+        ...database,
+        error: database.error ? `${host}: ${database.error}` : database.error,
+      },
+      redis,
+    },
   };
 }
 
