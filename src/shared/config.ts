@@ -29,10 +29,12 @@ loadDotenv({ path: [`.env.${process.env.NODE_ENV ?? 'development'}`, '.env'] });
  * keeps the localhost default and every login times out.
  */
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL =
+  const alias =
     process.env.POSTGRESQLCONNSTR_DATABASE_URL ||
     process.env.CUSTOMCONNSTR_DATABASE_URL ||
     process.env.POSTGRESQLCONNSTR_POSTGRESQL;
+  // Assigning undefined to process.env stores the string "undefined".
+  if (alias) process.env.DATABASE_URL = alias;
 }
 
 /**
