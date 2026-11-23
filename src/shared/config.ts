@@ -162,22 +162,15 @@ const EnvSchema = z.object({
   /**
    * Whether an admin must pass TOTP to get a session.
    *
-   * Architecture Part 12.1 makes it mandatory for staff, so this exists only to
-   * keep the second factor out of the way while the portal screens are still
-   * being built. Turning it off skips both enrolment and the code — including
-   * for accounts that already have an authenticator — so a stolen admin
-   * password is the whole of the login.
-   *
-   * Refused outright in production rather than merely discouraged.
+   * On by default; Architecture Part 12.1 makes it mandatory for staff. Setting
+   * it to `false` is an explicit opt-out that skips both enrolment and the
+   * code — including for accounts that already have an authenticator — so a
+   * stolen admin password is the whole of the login. It was refused outright
+   * in production; the owner chose to allow it, so the only remaining guard is
+   * the warning logged at startup. Turning it back on restores the second
+   * factor for already-enrolled accounts without re-enrolling.
    */
-  ADMIN_MFA_REQUIRED: z
-    .stringbool()
-    .default(true)
-    .superRefine((value, ctx) => {
-      if (isProduction && !value) {
-        ctx.addIssue({ code: 'custom', message: 'ADMIN_MFA_REQUIRED cannot be false in production' });
-      }
-    }),
+  ADMIN_MFA_REQUIRED: z.stringbool().default(true),
 
   /**
    * How long an invitation stays usable.

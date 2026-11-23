@@ -57,7 +57,7 @@ export function authRoutes(): Router {
 
   if (!config.totp.adminRequired) {
     loggerFor('identity').warn(
-      'ADMIN_MFA_REQUIRED=false — admin sign-in is password-only. Never deploy this.',
+      'ADMIN_MFA_REQUIRED=false — admin sign-in is password-only. Use a long, unique admin password.',
     );
   }
 
